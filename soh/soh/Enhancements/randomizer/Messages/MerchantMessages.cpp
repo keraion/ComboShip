@@ -6,7 +6,9 @@
  * including both shops and one-off merchants (i.e. Medigoron, Bean Guy,
  * and Carpet Salesman)
  */
+
 #include <soh/OTRGlobals.h>
+#include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/ObjectExtension/ObjectExtension.h"
 #include "soh/Enhancements/randomizer/randomizer.h"
 #ifdef COMBO_BUILD
@@ -14,11 +16,10 @@
 #endif
 
 extern "C" {
-extern PlayState* gPlayState;
 #include <macros.h>
 #include <functions.h>
-#include <variables.h>
 #include <overlays/actors/ovl_En_Dns/z_en_dns.h>
+extern PlayState* gPlayState;
 }
 
 #define RAND_GET_ITEM(rc) OTRGlobals::Instance->gRandoContext->GetItemLocation(rc)
@@ -45,6 +46,7 @@ void BuildMerchantMessage(CustomMessage& msg, RandomizerCheck rc, bool mysteriou
         Text trickName = RAND_GET_OVERRIDE(rc).GetTrickName();
         if (!inShop) {
             trickName = RAND_GET_OVERRIDE(rc).GetTrickArticle() + trickName;
+<<<<<<< HEAD
         }
         itemName = CustomMessage(trickName);
         color = "%g";
@@ -71,7 +73,16 @@ void BuildMerchantMessage(CustomMessage& msg, RandomizerCheck rc, bool mysteriou
         } else {
             // Hint text brings its own article
             itemName = Rando::StaticData::RetrieveItem(rgid).GetHint().GetHintMessage();
+=======
+>>>>>>> vendor-soh
         }
+        itemName = CustomMessage(trickName);
+        color = "%g";
+    } else if (inShop) {
+        itemName = CustomMessage(Rando::StaticData::RetrieveItem(rgid).GetName());
+    } else {
+        // Hint text brings its own article
+        itemName = Rando::StaticData::RetrieveItem(rgid).GetHint().GetHintMessage();
     }
     msg.Replace("[[color]]", color);
     msg.InsertNames({ itemName, CustomMessage(std::to_string(location->GetPrice())) });

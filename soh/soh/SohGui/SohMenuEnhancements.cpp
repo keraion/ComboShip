@@ -1,17 +1,20 @@
 ﻿#include "SohMenu.h"
 #include <soh/Enhancements/enhancementTypes.h>
 #include "soh/Enhancements/SwitchAge.h"
+#include "soh/Enhancements/AdultMasks.h"
+#include "soh/Enhancements/BunnyHood.h"
 #include <soh/Enhancements/game-interactor/GameInteractor.h>
 #include <soh/OTRGlobals.h>
 #include <soh/Enhancements/cosmetics/authenticGfxPatches.h>
 #include <soh/Enhancements/TimeDisplay/TimeDisplay.h>
-#include "soh/Enhancements/randomizer/randomizer.h"
 #include "soh/Enhancements/Restorations/GetItemManipulation.h"
+#include "soh/Enhancements/randomizer/SeedContext.h"
 #include <ship/Context.h>
 
 extern "C" {
 #include "functions.h"
 #include "variables.h"
+#include "macros.h"
 extern PlayState* gPlayState;
 }
 
@@ -87,6 +90,15 @@ static const std::map<int32_t, const char*> sleepingWaterfallOptions = {
     { WATERFALL_NEVER, "Never" },
 };
 
+static const std::map<int32_t, const char*> bombchuBowlingFirstPrizeOptions = {
+    { BOWLING_FIRST_PRIZE_RANDOM, "Random" },
+    { BOWLING_FIRST_PRIZE_BOMB_BAG, "Bomb Bag" },
+    { BOWLING_FIRST_PRIZE_PURPLE_RUPEE, "Purple Rupee" },
+    { BOWLING_FIRST_PRIZE_BOMBCHUS, "Bombchus" },
+    { BOWLING_FIRST_PRIZE_HEART_PIECE, "Heart Piece" },
+    { BOWLING_FIRST_PRIZE_BOMBS, "Bombs" },
+};
+
 static const std::map<int32_t, const char*> allPowers = {
     { DAMAGE_VANILLA, "Vanilla (1x)" },      { DAMAGE_DOUBLE, "Double (2x)" },
     { DAMAGE_QUADRUPLE, "Quadruple (4x)" },  { DAMAGE_OCTUPLE, "Octuple (8x)" },
@@ -136,6 +148,12 @@ static const std::map<int32_t, const char*> zFightingOptions = {
     { ZFIGHT_FIX_DISABLED, "Disabled" },
     { ZFIGHT_FIX_CONSISTENT_VANISH, "Consistent Vanish" },
     { ZFIGHT_FIX_NO_VANISH, "No Vanish" },
+};
+
+static const std::map<int32_t, const char*> teleportTrapModes = {
+    { TELEPORT_TRAP_OFF, "Off" },
+    { TELEPORT_TRAP_SIMPLE, "Simple" },
+    { TELEPORT_TRAP_ADVANCED, "Advanced" },
 };
 
 static const std::map<int32_t, const char*> swordToggleModes = {
@@ -334,6 +352,12 @@ void SohMenu::AddMenuEnhancements() {
             "Butterflies will transform into a fairy as soon as you approach them with a Deku Stick, "
             "skipping the need to stand still and let the butterfly land on your stick."));
 
+    AddWidget(path, "Allow Dropping Throw-Only Objects", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_ENHANCEMENT("DropThrowOnlyObjects"))
+        .Options(CheckboxOptions().Tooltip("Allows normally throw-only objects (such as Cuccos, pots, grass, and small "
+                                           "rocks) to be dropped by pressing A while standing still. Can be toggled "
+                                           "while holding an object."));
+
     AddWidget(path, "Convenience", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Quit Fishing at Door", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("QuitFishingAtDoor"))
@@ -431,6 +455,10 @@ void SohMenu::AddMenuEnhancements() {
     AddWidget(path, "Skip Song Cutscenes", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("TimeSavers.SkipCutscene.LearnSong"))
         .Options(CheckboxOptions().DefaultValue(IS_RANDO));
+    AddWidget(path, "Skip Warp Cutscenes", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_ENHANCEMENT("WarpSongSkipAnimation"))
+        .Options(CheckboxOptions().DefaultValue(IS_RANDO).Tooltip(
+            "Warp songs skip the departure and arrival cutscenes, fading immediately to the destination."));
     AddWidget(path, "Skip Boss Introductions", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("TimeSavers.SkipCutscene.BossIntro"))
         .Options(CheckboxOptions().DefaultValue(IS_RANDO));
@@ -532,7 +560,8 @@ void SohMenu::AddMenuEnhancements() {
                                            "Currently it is only the BOTW crawlspace to a locked door."));
     AddWidget(path, "King Zora Speed: %.2fx", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_ENHANCEMENT("MweepSpeed"))
-        .Options(FloatSliderOptions().Min(0.1f).Max(5.0f).DefaultValue(1.0f).Format("%.2fx"));
+        .Options(FloatSliderOptions().Min(0.1f).Max(5.0f).DefaultValue(1.0f).Format("%.2fx").Tooltip(
+            "Increase the speed of King Zora's move animation (\"mweep\")"));
     AddWidget(path, "Faster Pause Menu", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("FasterPauseMenu"))
         .Options(CheckboxOptions().Tooltip("Speeds up animation of the pause menu, similar to Majora's Mask"));
@@ -880,7 +909,7 @@ void SohMenu::AddMenuEnhancements() {
 
     AddWidget(path, "Masks", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Bunny Hood Effect", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_ENHANCEMENT("MMBunnyHood"))
+        .CVar(CVAR_BUNNY_HOOD_NAME)
         .Options(ComboboxOptions()
                      .ComboMap(bunnyHoodEffectMap)
                      .Tooltip("Wearing the Bunny Hood grants a speed and jump boost like in Majora's Mask.\n"
@@ -888,7 +917,7 @@ void SohMenu::AddMenuEnhancements() {
                               "The effects of either option are not accounted for in Randomizer logic.\n"
                               "Also disables NPC's reactions to wearing the Bunny Hood."));
     AddWidget(path, "Masks Equippable as Adult", WIDGET_CVAR_CHECKBOX)
-        .CVar(CVAR_ENHANCEMENT("AdultMasks"))
+        .CVar(CVAR_ADULT_MASKS_NAME)
         .Options(CheckboxOptions().Tooltip("Allows masks to be equipped normally from the pause menu as adult."));
     AddWidget(path, "Persistent Masks", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("PersistentMasks"))
@@ -1512,6 +1541,13 @@ void SohMenu::AddMenuEnhancements() {
                      .DefaultValue(10)
                      .Format("%d bombchus")
                      .Tooltip("The number of Bombchus available at the start of the Bombchu Bowling minigame."));
+    AddWidget(path, "First Prize", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_ENHANCEMENT("BombchuBowlingFirstPrize"))
+        .PreFunc(bombchuBowlingDisabledFunc)
+        .Options(ComboboxOptions()
+                     .ComboMap(bombchuBowlingFirstPrizeOptions)
+                     .DefaultIndex(BOWLING_FIRST_PRIZE_RANDOM)
+                     .Tooltip("The prize the cycle starts on."));
     AddWidget(path, "Horseback Archery", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Customize Behavior##HBA", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("CustomizeHorsebackArchery"))
@@ -1817,10 +1853,16 @@ void SohMenu::AddMenuEnhancements() {
         .CVar(CVAR_ENHANCEMENT("ExtraTraps.Kill"))
         .PreFunc(
             [](WidgetInfo& info) { info.isHidden = CVarGetInteger(CVAR_ENHANCEMENT("ExtraTraps.Enabled"), 0) == 0; });
-    AddWidget(path, "Teleport Traps", WIDGET_CVAR_CHECKBOX)
+    AddWidget(path, "Teleport Traps", WIDGET_CVAR_COMBOBOX)
         .CVar(CVAR_ENHANCEMENT("ExtraTraps.Teleport"))
         .PreFunc(
-            [](WidgetInfo& info) { info.isHidden = CVarGetInteger(CVAR_ENHANCEMENT("ExtraTraps.Enabled"), 0) == 0; });
+            [](WidgetInfo& info) { info.isHidden = CVarGetInteger(CVAR_ENHANCEMENT("ExtraTraps.Enabled"), 0) == 0; })
+        .Options(ComboboxOptions()
+                     .ComboMap(teleportTrapModes)
+                     .DefaultIndex(TELEPORT_TRAP_OFF)
+                     .Tooltip("Where a Teleport Trap can send you. Off keeps them out of the trap pool.\n\n"
+                              "Simple: Link's House and the six warp song pads.\n"
+                              "Advanced: The same pool the randomizer uses when it shuffles spawns and warp songs."));
 
     // Cheats
     path.sidebarName = "Cheats";

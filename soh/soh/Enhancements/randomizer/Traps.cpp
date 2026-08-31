@@ -1,4 +1,5 @@
 #include "Traps.h"
+#include <libultraship/bridge/consolevariablebridge.h>
 #include "soh/Enhancements/randomizer/SeedContext.h"
 #include "soh/Enhancements/randomizer/static_data.h"
 #include "soh/ShipUtils.h"
@@ -1577,6 +1578,94 @@ static void InitTrickNames() {
         { Text{ "Squid-Hunt Key", "Squid-Hunt Key", "Squid-Hunt Key" }, Text{ "the ", "la ", "den " } },
     };
 
+    trickNameTable[RG_SHADOW_SILVER_BLADES] = {
+        // TODO_TRANSLATE
+        { Text{ "Shadow Silver: Bladders" }, Text{ "" } },
+    };
+    trickNameTable[RG_SHADOW_SILVER_PIT] = {
+        // TODO_TRANSLATE
+        { Text{ "Shadow Silver: Bit" }, Text{ "" } },
+    };
+    trickNameTable[RG_SHADOW_SILVER_SPIKES] = {
+        // TODO_TRANSLATE
+        { Text{ "Shadow Silver: Spines" }, Text{ "" } },
+    };
+    trickNameTable[RG_SPIRIT_SILVER_CHILD] = {
+        // TODO_TRANSLATE
+        { Text{ "Spirit Silver: Chill" }, Text{ "" } },
+    };
+    trickNameTable[RG_SPIRIT_SILVER_SUN] = {
+        // TODO_TRANSLATE
+        { Text{ "Spirit Silver: Son" }, Text{ "" } },
+    };
+    trickNameTable[RG_SPIRIT_SILVER_BOULDERS] = {
+        // TODO_TRANSLATE
+        { Text{ "Spirit Silver: Bounders" }, Text{ "" } },
+    };
+    trickNameTable[RG_BOTW_SILVER] = {
+        // TODO_TRANSLATE
+        { Text{ "Bottom of the Well Slipper" }, Text{ "" } },
+    };
+    trickNameTable[RG_ICE_CAVERN_SILVER_BLADES] = {
+        // TODO_TRANSLATE
+        { Text{ "Ice Cavern Silver: Blaze" }, Text{ "" } },
+    };
+    trickNameTable[RG_ICE_CAVERN_SILVER_BLOCK] = {
+        // TODO_TRANSLATE
+        { Text{ "Ice Cavern Silver: Black" }, Text{ "" } },
+    };
+    trickNameTable[RG_GTG_SILVER_SLOPE] = {
+        // TODO_TRANSLATE
+        { Text{ "Training Ground Silver: Snope" }, Text{ "" } },
+    };
+    trickNameTable[RG_GTG_SILVER_LAVA] = {
+        // TODO_TRANSLATE
+        { Text{ "Traning Ground Silver: Love" }, Text{ "" } },
+    };
+    trickNameTable[RG_GTG_SILVER_WATER] = {
+        // TODO_TRANSLATE
+        { Text{ "Training Pound Silver: Water" }, Text{ "" } },
+    };
+    trickNameTable[RG_GANONS_CASTLE_SILVER_LIGHT] = {
+        // TODO_TRANSLATE
+        { Text{ "Ganon's Castle Silver: Lighter" }, Text{ "" } },
+    };
+    trickNameTable[RG_GANONS_CASTLE_SILVER_FOREST] = {
+        // TODO_TRANSLATE
+        { Text{ "Ganon's Castle Silver: Frost" }, Text{ "" } },
+    };
+    trickNameTable[RG_GANONS_CASTLE_SILVER_FIRE] = {
+        // TODO_TRANSLATE
+        { Text{ "Ganon's Castle Silver: Free" }, Text{ "" } },
+    };
+    trickNameTable[RG_GANONS_CASTLE_SILVER_SPIRIT] = {
+        // TODO_TRANSLATE
+        { Text{ "Ganon's Castle Silver: Sprite" }, Text{ "" } },
+    };
+    trickNameTable[RG_DODONGOS_CAVERN_MQ_SILVER] = {
+        // TODO_TRANSLATE
+        { Text{ "Dodongo's Cave Silver" }, Text{ "" } },
+    };
+    trickNameTable[RG_SHADOW_MQ_SILVER_INVISIBLE_BLADES] = {
+        // TODO_TRANSLATE
+        { Text{ "Shadow Silver: Invisible" }, Text{ "" } },
+    };
+    trickNameTable[RG_SPIRIT_MQ_SILVER_LOBBY] = {
+        // TODO_TRANSLATE
+        { Text{ "Spirit Silver: Foyer" }, Text{ "" } },
+    };
+    trickNameTable[RG_SPIRIT_MQ_SILVER_BIG_WALL] = {
+        // TODO_TRANSLATE
+        { Text{ "Spirit Silver: Brick" }, Text{ "" } },
+    };
+    trickNameTable[RG_GANONS_CASTLE_MQ_SILVER_WATER] = {
+        // TODO_TRANSLATE
+        { Text{ "Ganon's Castle Silver: Wheat" }, Text{ "" } },
+    };
+    trickNameTable[RG_GANONS_CASTLE_MQ_SILVER_SHADOW] = {
+        // TODO_TRANSLATE
+        { Text{ "Ganon's Castle Silver: Shabom" }, Text{ "" } },
+    };
     /*
     //Names for individual upgrades, in case progressive names are replaced
     trickNameTable[GI_HOOKSHOT] = {
@@ -1823,6 +1912,8 @@ RandomizerGet Rando::Traps::GetTrapTrickModel(uint64_t* state) {
         trickModel = ShipUtils::RandomElement(Rando::StaticData::overworldKeys, state);
     } else if (trickModel == RG_DEATH_MOUNTAIN_CRATER_BEAN_SOUL) {
         trickModel = ShipUtils::RandomElement(Rando::StaticData::beanSouls, state);
+    } else if (trickModel == RG_SHADOW_SILVER_BLADES) {
+        trickModel = ShipUtils::RandomElement(Rando::StaticData::silverRupees);
     }
 
     return trickModel;

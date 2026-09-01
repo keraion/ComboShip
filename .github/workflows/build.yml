@@ -79,13 +79,18 @@ jobs:
           save: ${{ github.ref_name == 'develop' }}
           key: ${{ runner.os }}-x64-${{ github.sha }}
           restore-keys: ${{ runner.os }}-x64-
-      # MSBuild needs the directory holding sccache.exe (CLToolPath below); the action installs it
-      # under %USERPROFILE%\.cargo\bin on Windows, but resolve it from PATH rather than hard-coding.
-      - name: Locate sccache
+      # sccache only wraps a compiler when it is either given the compiler as its first argument or
+      # is itself *named* like the compiler. MSBuild's CLToolExe hook does neither: it runs the tool
+      # with cl.exe's own arguments. So hand MSBuild a copy of sccache.exe named cl.exe, in a
+      # directory that is not on PATH; sccache sees its own name, looks up the real cl.exe on PATH
+      # (the MSVC one from msvc-dev-cmd) and proxies to it. Same trick as o3de's CompilerLauncher.cmake.
+      - name: Stage sccache as cl.exe
         shell: pwsh
         run: |
-          $dir = (Split-Path (Get-Command sccache).Source) -replace '\\', '/'
-          "SCCACHE_BIN_DIR=$dir" >> $env:GITHUB_ENV
+          $shim = Join-Path $env:RUNNER_TEMP 'sccache-cl'
+          New-Item -ItemType Directory -Force -Path $shim | Out-Null
+          Copy-Item (Get-Command sccache).Source (Join-Path $shim 'cl.exe')
+          "SCCACHE_CL_DIR=$($shim -replace '\\', '/')" >> $env:GITHUB_ENV
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -121,7 +126,9 @@ jobs:
         # breaks automate-vcpkg.cmake's git pull. Point it at the build-dir vcpkg it clones+caches.
         #
         # sccache wiring for the Visual Studio generator, which ignores CMAKE_<LANG>_COMPILER_LAUNCHER:
-        #  - CMAKE_VS_GLOBALS CLToolExe/CLToolPath make MSBuild run sccache.exe in place of cl.exe.
+        #  - CMAKE_VS_GLOBALS CLToolExe/CLToolPath make MSBuild run the sccache cl.exe shim staged
+        #    above in place of the real cl.exe. CMake's compiler-identification project inherits these
+        #    globals too, so the shim has to work before the first try_compile.
         #  - UseMultiToolTask=true: with /MP (set globally in CMakeLists.txt) the CL task would pass
         #    every source to one cl.exe invocation, which sccache refuses to cache. MultiToolTask
         #    invokes the tool once per file and parallelises in MSBuild instead.
@@ -135,7 +142,7 @@ jobs:
         run: >-
           cmake -B build/x64 -S . -G "Visual Studio 17 2022" -A x64
           -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-          "-DCMAKE_VS_GLOBALS=CLToolExe=sccache.exe;CLToolPath=$env:SCCACHE_BIN_DIR;UseMultiToolTask=true;TrackFileAccess=false"
+          "-DCMAKE_VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$env:SCCACHE_CL_DIR;UseMultiToolTask=true;TrackFileAccess=false"
 
       # Order matters: libultraship -> soh -> 2ship (soh before 2ship; they share OTRExporter/ZAPD).
       # comboui + ComboShip pull the rest of the runtime in as dependencies.

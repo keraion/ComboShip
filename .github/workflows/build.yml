@@ -4,6 +4,10 @@ name: Build (reusable)
 # Windows Release build + cpack ZIP. Called by build-artifacts.yml (PR / develop nightly) and
 # release.yml (v* tags), so the release ZIP is built identically to what nightly tested.
 # See docs/UPSTREAM_MERGES.md and CMake/CPackProjectConfig.cmake (the combo/ship/2s2h ZIP components).
+#
+# Compile caching: every develop push saves an sccache object cache; PR and tag builds restore the
+# newest develop cache and only recompile what their diff touches (a cache miss falls back to a plain
+# cl.exe compile, so a stale or evicted cache costs time, never correctness). See the sccache steps.
 
 on:
   workflow_call:
@@ -60,6 +64,29 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Compiler cache. MSBuild's own incremental build is useless on a runner: a fresh checkout stamps
+      # every source newer than any cached .obj, so it recompiled everything (~35 min) even when the
+      # old build/x64 cache hit. sccache keys on preprocessed content instead, so restoring develop's
+      # cache turns a PR build into a partial compile of only the files the PR actually changes.
+      # Only develop saves (one entry per push; unused entries age out of the 10 GB repo budget);
+      # PRs and v* tags restore the newest develop entry via restore-keys. Mirrors upstream
+      # 2ship/libultraship CI (they use Ninja; we keep the VS generator, see Configure).
+      - name: Set up sccache
+        uses: hendrikmuhs/ccache-action@v1.2.22
+        with:
+          variant: sccache
+          max-size: "2G"
+          save: ${{ github.ref_name == 'develop' }}
+          key: ${{ runner.os }}-x64-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-x64-
+      # MSBuild needs the directory holding sccache.exe (CLToolPath below); the action installs it
+      # under %USERPROFILE%\.cargo\bin on Windows, but resolve it from PATH rather than hard-coding.
+      - name: Locate sccache
+        shell: pwsh
+        run: |
+          $dir = (Split-Path (Get-Command sccache).Source) -replace '\\', '/'
+          "SCCACHE_BIN_DIR=$dir" >> $env:GITHUB_ENV
+
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -71,20 +98,44 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Shared with the compile gate: caches the expensive vcpkg build + CMake tree.
-      - name: Cache build dir (vcpkg + CMake)
+      # Caches the expensive vcpkg dependency build (sdl2, glew, libzip, spdlog, ...), which
+      # automate-vcpkg.cmake clones + installs under build/x64/vcpkg. Only the installed tree is kept:
+      # vcpkg's buildtrees/downloads/packages are scratch, and the rest of build/x64 (objects, CMake
+      # tree) is now covered by sccache above. The old whole-build-dir entries stay reachable through
+      # the build-x64- restore key so the first run after this change still finds its vcpkg tree.
+      - name: Cache vcpkg
         uses: actions/cache@v5
         with:
-          path: build/x64
-          key: build-x64-${{ hashFiles('CMakeLists.txt', 'CMake/**', 'libultraship/cmake/**') }}
-          restore-keys: build-x64-
+          path: |
+            build/x64/vcpkg
+            !build/x64/vcpkg/buildtrees
+            !build/x64/vcpkg/downloads
+            !build/x64/vcpkg/packages
+          key: vcpkg-x64-${{ hashFiles('CMakeLists.txt', 'CMake/**', 'libultraship/cmake/**') }}
+          restore-keys: |
+            vcpkg-x64-
+            build-x64-
 
       - name: Configure
         # See build-windows.yml: vcvars points VCPKG_ROOT at the (non-git) VS-bundled vcpkg, which
         # breaks automate-vcpkg.cmake's git pull. Point it at the build-dir vcpkg it clones+caches.
+        #
+        # sccache wiring for the Visual Studio generator, which ignores CMAKE_<LANG>_COMPILER_LAUNCHER:
+        #  - CMAKE_VS_GLOBALS CLToolExe/CLToolPath make MSBuild run sccache.exe in place of cl.exe.
+        #  - UseMultiToolTask=true: with /MP (set globally in CMakeLists.txt) the CL task would pass
+        #    every source to one cl.exe invocation, which sccache refuses to cache. MultiToolTask
+        #    invokes the tool once per file and parallelises in MSBuild instead.
+        #  - TrackFileAccess=false: MSBuild's file tracker can't see through the sccache client/server
+        #    split and errors out. This drops MSBuild's up-to-date checks, so each `cmake --build` step
+        #    below re-runs its dependencies' compiles through sccache (cheap hits, not free).
+        #  - CMAKE_<LANG>_COMPILER_LAUNCHER is still passed because the CMake tree (CMakeLists.txt,
+        #    */CMake/DefaultCXX.cmake) keys off it to pick /Z7 over /Zi; a shared .pdb is uncacheable.
         env:
           VCPKG_ROOT: ${{ github.workspace }}/build/x64/vcpkg
-        run: cmake -B build/x64 -S . -G "Visual Studio 17 2022" -A x64
+        run: >-
+          cmake -B build/x64 -S . -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          "-DCMAKE_VS_GLOBALS=CLToolExe=sccache.exe;CLToolPath=$env:SCCACHE_BIN_DIR;UseMultiToolTask=true;TrackFileAccess=false"
 
       # Order matters: libultraship -> soh -> 2ship (soh before 2ship; they share OTRExporter/ZAPD).
       # comboui + ComboShip pull the rest of the runtime in as dependencies.
@@ -104,6 +155,11 @@ jobs:
         run: cmake --build build/x64 --target comboui --config Release
       - name: Build ComboShip
         run: cmake --build build/x64 --target ComboShip --config Release
+
+      # Hit/miss counts for the whole job. A PR that only touches a few files should show mostly hits;
+      # "Compile requests" rising step over step is the TrackFileAccess=false re-pass, not a miss.
+      - name: sccache stats
+        run: sccache --show-stats
 
       # Port asset archives (--norom). GenerateSohOtr/Generate2ShipOtr DEPEND on ZAPD, which these
       # steps build on demand. They must run before cpack — the ship/2s2h ZIP components install

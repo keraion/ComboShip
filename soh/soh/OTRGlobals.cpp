@@ -59,6 +59,9 @@
 #include "soh/Enhancements/randomizer/randomizerEnumStrings.h"    // ComboShip: EnumToString<RandomizerHintTextKey>()
 #include "soh/Enhancements/randomizer/hint.h" // ComboShip: Rando::Hint/AddHint for SOH_ApplyComboHints
 #include "Enhancements/gameplaystats.h"
+#ifdef COMBO_BUILD
+#include "soh/Enhancements/TimeDisplay/TimeDisplay.h" // ComboShip: NAVI_* phase bounds for SOH_GetOverlayTimers
+#endif
 #include "soh/Enhancements/savestates.h"
 #include "frame_interpolation.h"
 #include "SohGui/SohMenu.h"
@@ -4241,6 +4244,9 @@ static bool Combo_IsUsedHintTemplate(const std::string& name) {
         "RHT_CAN_BE_FOUND_AT",
         "RHT_HOARDS",
         "RHT_GANONDORF_HINT_LA_ONLY",
+        "RHT_GANONDORF_HINT_MS_ONLY",
+        "RHT_GANONDORF_HINT_LA_AND_MS",
+        "RHT_YOUR_POCKET",
         // Altar templates + option-driven end clauses (Fix 3: combo composes altar hints itself).
         "RHT_CHILD_ALTAR_STONES",
         "RHT_CHILD_ALTAR_TEXT_END_DOTOPEN",
@@ -4401,6 +4407,9 @@ extern "C" __declspec(dllexport) const char* SOH_DumpRandoHintData(void) {
             { "hintClarity", static_cast<int>(ctx->GetOption(RSK_HINT_CLARITY).Get()) },
             { "hintDistribution", static_cast<int>(ctx->GetOption(RSK_HINT_DISTRIBUTION).Get()) },
             { "ganondorfHint", static_cast<int>(ctx->GetOption(RSK_GANONDORF_HINT).Get()) },
+            // Ganondorf's hint text has three variants, chosen by these two (see CreateGanondorfHint).
+            { "shuffleMasterSword", static_cast<int>(ctx->GetOption(RSK_SHUFFLE_MASTER_SWORD).Get()) },
+            { "startingMasterSword", static_cast<int>(ctx->GetOption(RSK_STARTING_MASTER_SWORD).Get()) },
             { "warpSongHints", static_cast<int>(ctx->GetOption(RSK_WARP_SONG_HINTS).Get()) },
             { "totAltarHint", static_cast<int>(ctx->GetOption(RSK_TOT_ALTAR_HINT).Get()) },
             { "doorOfTimeTemplate", doorOfTimeKey },
@@ -4943,6 +4952,58 @@ extern "C" __declspec(dllexport) const char* SOH_GetComboSpoilerPath(void) {
 extern "C" __declspec(dllexport) int SOH_GetActiveFileNum(void) {
     return (gSaveContext.fileNum == 0xFF) ? -1 : (int)gSaveContext.fileNum;
 }
+
+#ifdef COMBO_BUILD
+// ComboShip (#173): combo owns the timer overlay; these feed it OOT's half. Play time is the in-game
+// (non-RTA) value on purpose — the RTA branch is wall clock and would double-count time spent in MM.
+extern "C" __declspec(dllexport) uint64_t SOH_GetPlaytimeDeciseconds(void) {
+    return (uint64_t)(gSaveContext.ship.stats.playTimer / 2 + gSaveContext.ship.stats.pauseTimer / 3);
+}
+
+// Live OOT-only overlay rows, classified here so comboui hardcodes no vanilla enum values.
+// Returns 0 with the outputs untouched when there is no PlayState.
+// naviPhase 0=prepare 1=active 2=cooldown, naviTicks counts down at 20/s.
+// timerKind 0=off 1=hot 2=cold 3=countdown 4=running (no icon) — mirrors TimeDisplayGetTimer.
+extern "C" __declspec(dllexport) int SOH_GetOverlayTimers(uint32_t* dayTime, int32_t* isDay, int32_t* naviPhase,
+                                                          uint32_t* naviTicks, int32_t* timerKind,
+                                                          int32_t* timerSeconds) {
+    if (gPlayState == NULL) {
+        return 0;
+    }
+    if (dayTime != NULL) {
+        *dayTime = (uint32_t)gSaveContext.dayTime;
+    }
+    if (isDay != NULL) {
+        *isDay = (gSaveContext.dayTime >= DAY_BEGINS && gSaveContext.dayTime < NIGHT_BEGINS) ? 1 : 0;
+    }
+    if (naviPhase != NULL && naviTicks != NULL) {
+        uint32_t t = gSaveContext.naviTimer;
+        if (t <= NAVI_PREPARE) {
+            *naviPhase = 0;
+            *naviTicks = NAVI_PREPARE - t;
+        } else if (t <= NAVI_ACTIVE) {
+            *naviPhase = 1;
+            *naviTicks = NAVI_ACTIVE - t;
+        } else {
+            *naviPhase = 2;
+            *naviTicks = (t <= NAVI_COOLDOWN) ? NAVI_COOLDOWN - t : 0;
+        }
+    }
+    if (timerKind != NULL && timerSeconds != NULL) {
+        *timerSeconds = (int32_t)gSaveContext.timerSeconds;
+        if (gSaveContext.timerState <= TIMER_STATE_OFF) {
+            *timerKind = 0;
+        } else if (gSaveContext.timerState <= TIMER_STATE_ENV_HAZARD_TICK) {
+            *timerKind = (gPlayState->roomCtx.curRoom.behaviorType2 == ROOM_BEHAVIOR_TYPE2_3) ? 1 : 2;
+        } else if (gSaveContext.timerState >= TIMER_STATE_DOWN_PREVIEW) {
+            *timerKind = 3;
+        } else {
+            *timerKind = 4;
+        }
+    }
+    return 1;
+}
+#endif
 
 // ComboShip: JSON array of OOT rando checks the player has obtained, for the sphere-hint system
 // (which step is "done"). Reads the live rando Context; safe to call while OOT is dormant.

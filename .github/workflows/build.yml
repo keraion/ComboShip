@@ -137,11 +137,15 @@ jobs:
         #    below re-runs its dependencies' compiles through sccache (cheap hits, not free).
         #  - CMAKE_<LANG>_COMPILER_LAUNCHER is still passed because the CMake tree (CMakeLists.txt,
         #    */CMake/DefaultCXX.cmake) keys off it to pick /Z7 over /Zi; a shared .pdb is uncacheable.
+        #  - COMBO_RELEASE_DEBUG_INFO=OFF: no compiler debug info in Release. With /Z7 each of soh's
+        #    ~1300 objects carries its own copy of the decomp type info and the Release LTCG link died
+        #    with LNK1248 (image > 4 GB). The Release PDB was never packaged, so nothing shipped changes.
         env:
           VCPKG_ROOT: ${{ github.workspace }}/build/x64/vcpkg
         run: >-
           cmake -B build/x64 -S . -G "Visual Studio 17 2022" -A x64
           -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DCOMBO_RELEASE_DEBUG_INFO=OFF
           "-DCMAKE_VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$env:SCCACHE_CL_DIR;UseMultiToolTask=true;TrackFileAccess=false"
 
       # Order matters: libultraship -> soh -> 2ship (soh before 2ship; they share OTRExporter/ZAPD).

@@ -104,11 +104,42 @@ else()
     MESSAGE("Skipping warning suppression")
 endif()
 
+# COMBO_RELEASE_DEBUG_INFO: emit compiler debug info (/Zi, or /Z7 under a compiler cache) in Release.
+# ON matches upstream. CI builds with it OFF: the Release PDB is deliberately not packaged (see the
+# "debugsymbols" component in soh/ and mm/), and under sccache's /Z7 every one of soh's ~1300 objects
+# carries its own copy of the decomp type info, which pushed the Release LTCG image past link.exe's
+# 4 GB limit (LNK1248 on soh.iobj). It also shrinks the objects sccache has to store. /DEBUG at link
+# is untouched, so the (unpackaged) PDB still exists with public symbols. See .github/workflows/build.yml.
+option(COMBO_RELEASE_DEBUG_INFO "Emit compiler debug info in Release builds (CI turns this off)" ON)
+
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     if (CMAKE_C_COMPILER_LAUNCHER MATCHES "ccache|sccache")
-        set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
+        if (COMBO_RELEASE_DEBUG_INFO)
+            set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
+        else()
+            set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<NOT:$<CONFIG:Release>>:Embedded>")
+        endif()
     endif()
 endif()
+
+# The per-project DefaultCXX.cmake props (soh/, mm/, libultraship/, ZAPDTR/, OTRExporter/ copies) put
+# /Zi or /Z7 into every config through the DEFAULT_CXX_DEBUG_INFORMATION_FORMAT_<CONFIG> target property,
+# read by a generator expression at generate time. Blanking the Release one after the sub-projects exist
+# (called below) turns the flag off without editing each vendored copy: an empty config-specific value
+# falls back to the unset general property, i.e. no flag.
+function(combo_strip_release_debug_info DIR)
+    get_property(_subdirs DIRECTORY "${DIR}" PROPERTY SUBDIRECTORIES)
+    foreach(_sub IN LISTS _subdirs)
+        combo_strip_release_debug_info("${_sub}")
+    endforeach()
+    get_property(_targets DIRECTORY "${DIR}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_t IN LISTS _targets)
+        get_target_property(_type "${_t}" TYPE)
+        if (NOT _type STREQUAL "INTERFACE_LIBRARY")
+            set_target_properties("${_t}" PROPERTIES DEFAULT_CXX_DEBUG_INFORMATION_FORMAT_RELEASE "")
+        endif()
+    endforeach()
+endfunction()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows|Linux")
     if(NOT DEFINED BUILD_CROWD_CONTROL)
@@ -270,6 +301,10 @@ add_subdirectory(soh ${CMAKE_BINARY_DIR}/soh)
 add_subdirectory(mm ${CMAKE_BINARY_DIR}/mm)
 
 add_subdirectory(combo ${CMAKE_BINARY_DIR}/combo)
+
+if (MSVC AND NOT COMBO_RELEASE_DEBUG_INFO)
+    combo_strip_release_debug_info("${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
 
 ################################################################################
 # Meta target to build both games and the combo executable

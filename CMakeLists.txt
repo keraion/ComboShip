@@ -343,6 +343,14 @@ add_custom_target(
     COMMENT "Generating 2ship.o2r..."
     DEPENDS ZAPD CheckAssetCollisions)
 
+# ComboShip CI: one umbrella so .github/workflows/build.yml drives a single msbuild invocation. CI
+# runs MSBuild through sccache with TrackFileAccess=false, which disables MSBuild's up-to-date checks,
+# so every separate `cmake --build --target X` re-pushes X's whole dependency tree through sccache
+# again (2ship alone cost ~7 min per extra step). Deliberately not ALL: comborando stays
+# EXCLUDE_FROM_ALL and the o2r extraction stays out of a plain `combo` build.
+add_custom_target(ci-all)
+add_dependencies(ci-all combo comborando GenerateSohOtr Generate2ShipOtr)
+
 ################################################################################
 # Installation and Packaging
 ################################################################################

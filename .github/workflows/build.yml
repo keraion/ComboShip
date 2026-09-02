@@ -61,6 +61,9 @@ jobs:
     needs: gate
     # Pin to VS 2022 image — matches the "Visual Studio 17 2022" generator below (see build-windows.yml).
     runs-on: windows-2022
+    env:
+      # MSBuild file logger shared by the build steps below (see "Order matters").
+      MSBUILD_FLP: /flp:logfile=${{ runner.temp }}/msbuild.log;verbosity=normal;append
     steps:
       - uses: actions/checkout@v5
 
@@ -168,20 +171,28 @@ jobs:
           -DCOMBO_RELEASE_DEBUG_INFO=OFF -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
           "-DCMAKE_VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$env:CCACHE_CL_DIR;UseMultiToolTask=true;TrackFileAccess=false"
 
-      # `combo` is the project's own top-level target (root CMakeLists.txt): libultraship, ZAPD and
-      # OTRExporter, both games, comboui and ComboShip in one msbuild invocation, ordered by their
-      # project references. The MSBuild file logger keeps a fuller log (every tool's output, at
-      # normal verbosity) on disk without flooding the job log; it is only uploaded on failure.
-      - name: Build combo
-        run: >-
-          cmake --build build/x64 --target combo --config Release --
-          "/flp:logfile=$env:RUNNER_TEMP/msbuild.log;verbosity=normal"
-      # Headless seed validator (pulls libultraship/soh/2ship as deps: all ccache hits after the step
-      # above). Uploaded below so validate-seed.yml can download it from develop instead of doing its
-      # own build. Nothing else depends on it, so it is skipped unless a caller asks for the validator.
+      # Order matters: libultraship -> soh -> 2ship (soh before 2ship; they share OTRExporter/ZAPD).
+      # comboui + ComboShip pull the rest of the runtime in as dependencies. With TrackFileAccess=false
+      # each step re-runs its dependencies through ccache; those are direct-mode hits (no cl.exe run),
+      # roughly a minute over the whole job, in exchange for per-project timings and a fixed order.
+      # MSBUILD_FLP appends every step's tool output to one fuller log on disk (normal verbosity),
+      # kept out of the job log and only uploaded on failure.
+      - name: Build libultraship
+        run: cmake --build build/x64 --target libultraship --config Release -- "$env:MSBUILD_FLP"
+      - name: Build soh
+        run: cmake --build build/x64 --target soh --config Release -- "$env:MSBUILD_FLP"
+      - name: Build 2ship
+        run: cmake --build build/x64 --target 2ship --config Release -- "$env:MSBUILD_FLP"
+      # Headless seed validator (pulls libultraship/soh/2ship as deps, already built above). Uploaded
+      # below so validate-seed.yml can download it from develop instead of doing its own build.
+      # Nothing else depends on it, so it is skipped unless a caller asks for the validator.
       - name: Build comborando
         if: inputs.validator
-        run: cmake --build build/x64 --target comborando --config Release
+        run: cmake --build build/x64 --target comborando --config Release -- "$env:MSBUILD_FLP"
+      - name: Build comboui
+        run: cmake --build build/x64 --target comboui --config Release -- "$env:MSBUILD_FLP"
+      - name: Build ComboShip
+        run: cmake --build build/x64 --target ComboShip --config Release -- "$env:MSBUILD_FLP"
 
       # On failure, surface the lines leading up to the first "exited with code" from the fuller
       # MSBuild log; the whole log goes up as an artifact for anything that misses.

@@ -106,9 +106,9 @@ endif()
 
 # COMBO_RELEASE_DEBUG_INFO: emit compiler debug info (/Zi, or /Z7 under a compiler cache) in Release.
 # ON matches upstream. CI builds with it OFF: the Release PDB is deliberately not packaged (see the
-# "debugsymbols" component in soh/ and mm/), and under sccache's /Z7 every one of soh's ~1300 objects
+# "debugsymbols" component in soh/ and mm/), and under a compiler cache's /Z7 every one of soh's ~1300 objects
 # carries its own copy of the decomp type info, which pushed the Release LTCG image past link.exe's
-# 4 GB limit (LNK1248 on soh.iobj). It also shrinks the objects sccache has to store. /DEBUG at link
+# 4 GB limit (LNK1248 on soh.iobj). It also shrinks the objects the cache has to store. /DEBUG at link
 # is untouched, so the (unpackaged) PDB still exists with public symbols. See .github/workflows/build.yml.
 option(COMBO_RELEASE_DEBUG_INFO "Emit compiler debug info in Release builds (CI turns this off)" ON)
 
@@ -306,8 +306,9 @@ if (MSVC AND NOT COMBO_RELEASE_DEBUG_INFO)
     combo_strip_release_debug_info("${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
-# CMAKE_DISABLE_PRECOMPILE_HEADERS=ON (CI passes it so sccache can cache 2ship; sccache refuses MSVC
-# /Yc,/Yu,/Fp) makes CMake ignore target_precompile_headers entirely, including the *implicit include*
+# CMAKE_DISABLE_PRECOMPILE_HEADERS=ON (CI passes it so the compiler cache can key 2ship's objects;
+# neither ccache nor sccache caches MSVC /Yc,/Yu,/Fp compiles) makes CMake ignore
+# target_precompile_headers entirely, including the *implicit include*
 # every source got from the PCH. 2ship's sources rely on that and fail to compile without it. Rebuild
 # the same effect as forced includes (/FI, or -include elsewhere), per source, in PCH order, skipping
 # sources marked SKIP_PRECOMPILE_HEADERS exactly as the PCH did. Entries come back from the property
@@ -418,14 +419,6 @@ add_custom_target(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mm
     COMMENT "Generating 2ship.o2r..."
     DEPENDS ZAPD CheckAssetCollisions)
-
-# ComboShip CI: one umbrella so .github/workflows/build.yml drives a single msbuild invocation. CI
-# runs MSBuild through sccache with TrackFileAccess=false, which disables MSBuild's up-to-date checks,
-# so every separate `cmake --build --target X` re-pushes X's whole dependency tree through sccache
-# again (2ship alone cost ~7 min per extra step). Deliberately not ALL: comborando stays
-# EXCLUDE_FROM_ALL and the o2r extraction stays out of a plain `combo` build.
-add_custom_target(ci-all)
-add_dependencies(ci-all combo comborando GenerateSohOtr Generate2ShipOtr)
 
 ################################################################################
 # Installation and Packaging

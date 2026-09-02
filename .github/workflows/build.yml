@@ -80,6 +80,14 @@ jobs:
       # end in "-" itself, or it becomes "sccache-Windows-x64--" and never matches a saved entry.
       - name: Set up sccache
         uses: hendrikmuhs/ccache-action@v1.2.22
+        # The action starts the sccache server from this step, so the server inherits these. The
+        # server log is the only place a failure inside sccache's own compile path shows up: MSBuild
+        # runs at minimal verbosity and drops the client's stderr, leaving just "cl.exe exited with
+        # code 2". Uploaded by "Upload build diagnostics" below on failure. debug is verbose (tens of
+        # MB per run); drop to warn once the compile path is known-good.
+        env:
+          SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache-server.log
+          SCCACHE_LOG: debug
         with:
           variant: sccache
           max-size: "6G"
@@ -168,8 +176,41 @@ jobs:
       # references, so ZAPD/OTRExporter build once before either game and the o2r steps land before
       # cpack, which installs ${CMAKE_BINARY_DIR}/soh/soh.o2r and .../mm/2ship.o2r.
       # comborando is always built now (a few seconds); only its upload stays gated on `validator`.
+      # The MSBuild file logger keeps a detailed log (every tool's full output) on disk without
+      # flooding the job log; it is only uploaded when the build fails.
       - name: Build (ci-all)
-        run: cmake --build build/x64 --target ci-all --config Release
+        run: >-
+          cmake --build build/x64 --target ci-all --config Release --
+          "/flp:logfile=$env:RUNNER_TEMP/msbuild.log;verbosity=detailed"
+
+      # On failure, surface the tool output MSBuild hid: the lines leading up to the first
+      # "exited with code" (the sccache client / cl.exe text for that file) and any errors the
+      # sccache server logged. The full logs go up as an artifact for anything these miss.
+      - name: Show build failure context
+        if: failure()
+        shell: pwsh
+        run: |
+          $ms = Join-Path $env:RUNNER_TEMP 'msbuild.log'
+          if (Test-Path $ms) {
+            Write-Host '::group::msbuild.log: context before the first "exited with code"'
+            Select-String -Path $ms -Pattern 'exited with code' -Context 60,2 | Select-Object -First 1 | ForEach-Object { $_.Context.PreContext; $_.Line; $_.Context.PostContext }
+            Write-Host '::endgroup::'
+          }
+          $sl = Join-Path $env:RUNNER_TEMP 'sccache-server.log'
+          if (Test-Path $sl) {
+            Write-Host '::group::sccache-server.log: error/failed lines (last 60)'
+            Select-String -Path $sl -Pattern 'ERROR|WARN|failed|error:' | Select-Object -Last 60 | ForEach-Object { $_.Line }
+            Write-Host '::endgroup::'
+          }
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: |
+            ${{ runner.temp }}/msbuild.log
+            ${{ runner.temp }}/sccache-server.log
+          if-no-files-found: ignore
 
       # Hit/miss counts for the whole job. A PR that only touches a few files should show mostly hits.
       # "Non-cacheable reasons" naming /Fp or /Yc means precompiled headers crept back in.

@@ -106,9 +106,9 @@ endif()
 
 # COMBO_RELEASE_DEBUG_INFO: emit compiler debug info (/Zi, or /Z7 under a compiler cache) in Release.
 # ON matches upstream. CI builds with it OFF: the Release PDB is deliberately not packaged (see the
-# "debugsymbols" component in soh/ and mm/), and under sccache's /Z7 every one of soh's ~1300 objects
+# "debugsymbols" component in soh/ and mm/), and under a compiler cache's /Z7 every one of soh's ~1300 objects
 # carries its own copy of the decomp type info, which pushed the Release LTCG image past link.exe's
-# 4 GB limit (LNK1248 on soh.iobj). It also shrinks the objects sccache has to store. /DEBUG at link
+# 4 GB limit (LNK1248 on soh.iobj). It also shrinks the objects the cache has to store. /DEBUG at link
 # is untouched, so the (unpackaged) PDB still exists with public symbols. See .github/workflows/build.yml.
 option(COMBO_RELEASE_DEBUG_INFO "Emit compiler debug info in Release builds (CI turns this off)" ON)
 
@@ -306,6 +306,83 @@ if (MSVC AND NOT COMBO_RELEASE_DEBUG_INFO)
     combo_strip_release_debug_info("${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
+# CMAKE_DISABLE_PRECOMPILE_HEADERS=ON (CI passes it so the compiler cache can key 2ship's objects;
+# neither ccache nor sccache caches MSVC /Yc,/Yu,/Fp compiles) makes CMake ignore
+# target_precompile_headers entirely, including the *implicit include*
+# every source got from the PCH. 2ship's sources rely on that and fail to compile without it. Rebuild
+# the same effect as forced includes (/FI, or -include elsewhere), per source, in PCH order, skipping
+# sources marked SKIP_PRECOMPILE_HEADERS exactly as the PCH did. Entries come back from the property
+# as written: "$<$<COMPILE_LANGUAGE:CXX>:<string$<ANGLE-R>>" or "$<$<COMPILE_LANGUAGE:C>:/abs/z64.h>",
+# so the language is resolved here per source rather than left to a per-source genex.
+function(combo_pch_as_forced_includes DIR)
+    get_property(_subdirs DIRECTORY "${DIR}" PROPERTY SUBDIRECTORIES)
+    foreach(_sub IN LISTS _subdirs)
+        combo_pch_as_forced_includes("${_sub}")
+    endforeach()
+    if (MSVC)
+        set(_fi "/FI")
+    else()
+        set(_fi "-include")
+    endif()
+    get_property(_targets DIRECTORY "${DIR}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_t IN LISTS _targets)
+        get_target_property(_type "${_t}" TYPE)
+        if (_type STREQUAL "INTERFACE_LIBRARY")
+            continue()
+        endif()
+        get_target_property(_pch "${_t}" PRECOMPILE_HEADERS)
+        if (NOT _pch)
+            continue()
+        endif()
+        set(_opts_C "")
+        set(_opts_CXX "")
+        foreach(_h IN LISTS _pch)
+            set(_langs C CXX)
+            if (_h MATCHES "^\\$<\\$<COMPILE_LANGUAGE:([A-Za-z]+)>:(.*)>$")
+                set(_langs "${CMAKE_MATCH_1}")
+                set(_h "${CMAKE_MATCH_2}")
+            elseif (_h MATCHES "^\\$<")
+                message(WARNING "combo_pch_as_forced_includes: ${_t}: unhandled PCH entry '${_h}' applied to all languages")
+            endif()
+            if (_h MATCHES "^<(.*)\\$<ANGLE-R>$")
+                set(_h "${CMAKE_MATCH_1}")
+            endif()
+            foreach(_l IN LISTS _langs)
+                list(APPEND _opts_${_l} "${_fi}${_h}")
+            endforeach()
+        endforeach()
+        get_target_property(_srcdir "${_t}" SOURCE_DIR)
+        get_target_property(_srcs "${_t}" SOURCES)
+        foreach(_s IN LISTS _srcs)
+            if (_s MATCHES "^\\$<")
+                continue()
+            endif()
+            get_filename_component(_abs "${_s}" ABSOLUTE BASE_DIR "${_srcdir}")
+            get_source_file_property(_skip "${_abs}" TARGET_DIRECTORY "${_t}" SKIP_PRECOMPILE_HEADERS)
+            if (_skip)
+                continue()
+            endif()
+            get_source_file_property(_lang "${_abs}" TARGET_DIRECTORY "${_t}" LANGUAGE)
+            if (NOT _lang)
+                if (_abs MATCHES "\.c$")
+                    set(_lang C)
+                elseif (_abs MATCHES "\.(cpp|cxx|cc)$")
+                    set(_lang CXX)
+                else()
+                    continue()
+                endif()
+            endif()
+            if (DEFINED _opts_${_lang} AND _opts_${_lang})
+                set_property(SOURCE "${_abs}" TARGET_DIRECTORY "${_t}" APPEND PROPERTY COMPILE_OPTIONS ${_opts_${_lang}})
+            endif()
+        endforeach()
+    endforeach()
+endfunction()
+
+if (CMAKE_DISABLE_PRECOMPILE_HEADERS)
+    combo_pch_as_forced_includes("${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
 ################################################################################
 # Meta target to build both games and the combo executable
 ################################################################################
@@ -342,14 +419,6 @@ add_custom_target(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mm
     COMMENT "Generating 2ship.o2r..."
     DEPENDS ZAPD CheckAssetCollisions)
-
-# ComboShip CI: one umbrella so .github/workflows/build.yml drives a single msbuild invocation. CI
-# runs MSBuild through sccache with TrackFileAccess=false, which disables MSBuild's up-to-date checks,
-# so every separate `cmake --build --target X` re-pushes X's whole dependency tree through sccache
-# again (2ship alone cost ~7 min per extra step). Deliberately not ALL: comborando stays
-# EXCLUDE_FROM_ALL and the o2r extraction stays out of a plain `combo` build.
-add_custom_target(ci-all)
-add_dependencies(ci-all combo comborando GenerateSohOtr Generate2ShipOtr)
 
 ################################################################################
 # Installation and Packaging

@@ -5,9 +5,9 @@ name: Build (reusable)
 # release.yml (v* tags), so the release ZIP is built identically to what nightly tested.
 # See docs/UPSTREAM_MERGES.md and CMake/CPackProjectConfig.cmake (the combo/ship/2s2h ZIP components).
 #
-# Compile caching: every develop push saves an sccache object cache; PR and tag builds restore the
+# Compile caching: every develop push saves a ccache object cache; PR and tag builds restore the
 # newest develop cache and only recompile what their diff touches (a cache miss falls back to a plain
-# cl.exe compile, so a stale or evicted cache costs time, never correctness). See the sccache steps.
+# cl.exe compile, so a stale or evicted cache costs time, never correctness). See the ccache steps.
 
 on:
   workflow_call:
@@ -66,38 +66,49 @@ jobs:
 
       # Compiler cache. MSBuild's own incremental build is useless on a runner: a fresh checkout stamps
       # every source newer than any cached .obj, so it recompiled everything (~35 min) even when the
-      # old build/x64 cache hit. sccache keys on preprocessed content instead, so restoring develop's
-      # cache turns a PR build into a partial compile of only the files the PR actually changes.
+      # old build/x64 cache hit. ccache keys on source + included-header content instead, so restoring
+      # develop's cache turns a PR build into a partial compile of only the files the PR changes.
       # Only develop saves (one entry per push; unused entries age out of the 10 GB repo budget);
-      # PRs and v* tags restore the newest develop entry via restore-keys. Mirrors upstream
-      # 2ship/libultraship CI (they use Ninja; we keep the VS generator, see Configure).
-      # Sizing: a full Release object set (LTCG objects, no debug info) is ~3 GB uncompressed; the
-      # first run after this lands showed the 2G default already full and evicting. Each develop push
-      # then stores ~2.5 GB compressed, so the repo's 10 GB cache budget holds a few generations.
+      # PRs and v* tags restore the newest develop entry via restore-keys.
       #
-      # Keys: the action prefixes both keys with "sccache-" and, with append-timestamp (default on),
+      # ccache rather than sccache (which upstream 2ship/LUS use with Ninja): under MSBuild an
+      # in-process cache is the right shape. sccache's client/server split hid cl.exe's diagnostics
+      # (MSBuild hands cl.exe a pipe handle in VS_UNICODE_OUTPUT that means nothing in the server) and
+      # it has no preprocessor-cache mode for MSVC, so every hit still ran the preprocessor (~0.2-2 s
+      # on the decomp headers) and each separate `cmake --build` step re-paid that for its whole
+      # dependency tree. ccache runs cl.exe as its own child, so MSBuild sees errors natively, and its
+      # direct mode serves hits by hashing the recorded include list, without running cl.exe at all.
+      #
+      # Sizing: a full Release object set (LTCG objects, no debug info) is ~3 GB uncompressed;
+      # ccache zstd-compresses entries. Each develop push stores one entry, so the repo's 10 GB cache
+      # budget holds a few generations.
+      #
+      # Keys: the action prefixes both keys with "ccache-" and, with append-timestamp (default on),
       # appends "-<timestamp>" to the save key and "-" to each restore key. So restore-keys must NOT
-      # end in "-" itself, or it becomes "sccache-Windows-x64--" and never matches a saved entry.
-      - name: Set up sccache
+      # end in "-" itself, or it becomes "ccache-Windows-x64--" and never matches a saved entry.
+      - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2.22
         with:
-          variant: sccache
+          variant: ccache
           max-size: "6G"
           save: ${{ github.ref_name == 'develop' }}
           key: ${{ runner.os }}-x64-${{ github.sha }}
           restore-keys: ${{ runner.os }}-x64
-      # sccache only wraps a compiler when it is either given the compiler as its first argument or
-      # is itself *named* like the compiler. MSBuild's CLToolExe hook does neither: it runs the tool
-      # with cl.exe's own arguments. So hand MSBuild a copy of sccache.exe named cl.exe, in a
-      # directory that is not on PATH; sccache sees its own name, looks up the real cl.exe on PATH
-      # (the MSVC one from msvc-dev-cmd) and proxies to it. Same trick as o3de's CompilerLauncher.cmake.
-      - name: Stage sccache as cl.exe
+      # MSBuild's CLToolExe hook runs the tool with cl.exe's own arguments (one @response-file), and
+      # ccache only wraps a compiler when it is *named* like one. So hand MSBuild a copy of ccache.exe
+      # named cl.exe in a directory that is not on PATH: ccache sees its own name, finds the real
+      # cl.exe on PATH (the MSVC one from msvc-dev-cmd, first non-ccache match) and runs it as a
+      # child, which is what keeps MSBuild's diagnostics pipe working.
+      - name: Stage ccache as cl.exe
         shell: pwsh
         run: |
-          $shim = Join-Path $env:RUNNER_TEMP 'sccache-cl'
+          $shim = Join-Path $env:RUNNER_TEMP 'ccache-cl'
           New-Item -ItemType Directory -Force -Path $shim | Out-Null
-          Copy-Item (Get-Command sccache).Source (Join-Path $shim 'cl.exe')
-          "SCCACHE_CL_DIR=$($shim -replace '\\', '/')" >> $env:GITHUB_ENV
+          Copy-Item (Get-Command ccache).Source (Join-Path $shim 'cl.exe')
+          "CCACHE_CL_DIR=$($shim -replace '\\', '/')" >> $env:GITHUB_ENV
+          # MSBuild file logger shared by the build steps below (see "Order matters"). Exported here
+          # because runner.temp is not available to a job-level env block.
+          "MSBUILD_FLP=/flp:logfile=$env:RUNNER_TEMP/msbuild.log;verbosity=normal;append" >> $env:GITHUB_ENV
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -113,7 +124,7 @@ jobs:
       # Caches the expensive vcpkg dependency build (sdl2, glew, libzip, spdlog, ...), which
       # automate-vcpkg.cmake clones + installs under build/x64/vcpkg. Only the installed tree is kept:
       # vcpkg's buildtrees/downloads/packages are scratch, and the rest of build/x64 (objects, CMake
-      # tree) is now covered by sccache above. The old whole-build-dir entries stay reachable through
+      # tree) is now covered by ccache above. The old whole-build-dir entries stay reachable through
       # the build-x64- restore key so the first run after this change still finds its vcpkg tree.
       - name: Cache vcpkg
         uses: actions/cache@v5
@@ -132,49 +143,89 @@ jobs:
         # See build-windows.yml: vcvars points VCPKG_ROOT at the (non-git) VS-bundled vcpkg, which
         # breaks automate-vcpkg.cmake's git pull. Point it at the build-dir vcpkg it clones+caches.
         #
-        # sccache wiring for the Visual Studio generator, which ignores CMAKE_<LANG>_COMPILER_LAUNCHER:
-        #  - CMAKE_VS_GLOBALS CLToolExe/CLToolPath make MSBuild run the sccache cl.exe shim staged
-        #    above in place of the real cl.exe. CMake's compiler-identification project inherits these
-        #    globals too, so the shim has to work before the first try_compile.
+        # ccache wiring for the Visual Studio generator, which ignores CMAKE_<LANG>_COMPILER_LAUNCHER:
+        #  - CMAKE_VS_GLOBALS CLToolExe/CLToolPath make MSBuild run the ccache cl.exe staged above in
+        #    place of the real cl.exe. CMake's compiler-identification project inherits these globals
+        #    too, so it has to work before the first try_compile.
         #  - UseMultiToolTask=true: with /MP (set globally in CMakeLists.txt) the CL task would pass
-        #    every source to one cl.exe invocation, which sccache refuses to cache. MultiToolTask
+        #    every source to one cl.exe invocation, which no compiler cache can key. MultiToolTask
         #    invokes the tool once per file and parallelises in MSBuild instead.
-        #  - TrackFileAccess=false: MSBuild's file tracker can't see through the sccache client/server
-        #    split and errors out. This drops MSBuild's up-to-date checks, so each `cmake --build` step
-        #    below re-runs its dependencies' compiles through sccache (cheap hits, not free).
+        #  - TrackFileAccess=false: keeps MSBuild's file tracker out of the picture. It drops MSBuild's
+        #    own up-to-date checks, so a later `cmake --build` step re-runs its dependencies through
+        #    ccache; with direct-mode hits (no preprocessor run) that costs seconds, not minutes.
         #  - CMAKE_<LANG>_COMPILER_LAUNCHER is still passed because the CMake tree (CMakeLists.txt,
-        #    */CMake/DefaultCXX.cmake) keys off it to pick /Z7 over /Zi; a shared .pdb is uncacheable.
+        #    */CMake/DefaultCXX.cmake) keys off it to pick /Z7 over /Zi; ccache refuses /Zi outright.
         #  - COMBO_RELEASE_DEBUG_INFO=OFF: no compiler debug info in Release. With /Z7 each of soh's
         #    ~1300 objects carries its own copy of the decomp type info and the Release LTCG link died
         #    with LNK1248 (image > 4 GB). The Release PDB was never packaged, so nothing shipped changes.
-        #  - CMAKE_DISABLE_PRECOMPILE_HEADERS=ON: sccache cannot cache MSVC precompiled-header compiles
-        #    (/Yc, /Yu with /Fp), and 2ship uses target_precompile_headers, so without this every one
-        #    of its ~1500 objects recompiled on every run ("Non-cacheable reasons: /Fp" in the stats).
-        #    Cache misses for 2ship get somewhat slower; hits make it free.
+        #  - CMAKE_DISABLE_PRECOMPILE_HEADERS=ON: compiler caches can't key MSVC precompiled-header
+        #    compiles (/Yc, /Yu with /Fp), and 2ship uses target_precompile_headers, so with the PCH on
+        #    every one of its ~1350 objects recompiled on every run. The root CMakeLists.txt re-adds
+        #    the PCH's headers as forced includes so the sources still see them. Cache misses for 2ship
+        #    get somewhat slower; hits make it free.
         env:
           VCPKG_ROOT: ${{ github.workspace }}/build/x64/vcpkg
         run: >-
           cmake -B build/x64 -S . -G "Visual Studio 17 2022" -A x64
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           -DCOMBO_RELEASE_DEBUG_INFO=OFF -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
-          "-DCMAKE_VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$env:SCCACHE_CL_DIR;UseMultiToolTask=true;TrackFileAccess=false"
+          "-DCMAKE_VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$env:CCACHE_CL_DIR;UseMultiToolTask=true;TrackFileAccess=false"
 
-      # One msbuild invocation for everything: the ci-all umbrella (root CMakeLists.txt) pulls in
-      # libultraship, soh, 2ship, comboui, ComboShip, the comborando validator and the soh.o2r /
-      # 2ship.o2r extraction (--norom; they depend on ZAPD, built on demand). It has to be ONE
-      # invocation: TrackFileAccess=false (see Configure) turns off MSBuild's up-to-date checks, so
-      # a second `cmake --build --target X` re-pushes X's entire dependency tree through sccache
-      # again. Split into six steps this cost ~25 min per run. MSBuild orders the projects by their
-      # references, so ZAPD/OTRExporter build once before either game and the o2r steps land before
-      # cpack, which installs ${CMAKE_BINARY_DIR}/soh/soh.o2r and .../mm/2ship.o2r.
-      # comborando is always built now (a few seconds); only its upload stays gated on `validator`.
-      - name: Build (ci-all)
-        run: cmake --build build/x64 --target ci-all --config Release
+      # Order matters: libultraship -> soh -> 2ship (soh before 2ship; they share OTRExporter/ZAPD).
+      # comboui + ComboShip pull the rest of the runtime in as dependencies. With TrackFileAccess=false
+      # each step re-runs its dependencies through ccache; those are direct-mode hits (no cl.exe run),
+      # roughly a minute over the whole job, in exchange for per-project timings and a fixed order.
+      # MSBUILD_FLP appends every step's tool output to one fuller log on disk (normal verbosity),
+      # kept out of the job log and only uploaded on failure.
+      - name: Build libultraship
+        run: cmake --build build/x64 --target libultraship --config Release -- "$env:MSBUILD_FLP"
+      - name: Build soh
+        run: cmake --build build/x64 --target soh --config Release -- "$env:MSBUILD_FLP"
+      - name: Build 2ship
+        run: cmake --build build/x64 --target 2ship --config Release -- "$env:MSBUILD_FLP"
+      # Headless seed validator (pulls libultraship/soh/2ship as deps, already built above). Uploaded
+      # below so validate-seed.yml can download it from develop instead of doing its own build.
+      # Nothing else depends on it, so it is skipped unless a caller asks for the validator.
+      - name: Build comborando
+        if: inputs.validator
+        run: cmake --build build/x64 --target comborando --config Release -- "$env:MSBUILD_FLP"
+      - name: Build comboui
+        run: cmake --build build/x64 --target comboui --config Release -- "$env:MSBUILD_FLP"
+      - name: Build ComboShip
+        run: cmake --build build/x64 --target ComboShip --config Release -- "$env:MSBUILD_FLP"
 
-      # Hit/miss counts for the whole job. A PR that only touches a few files should show mostly hits.
-      # "Non-cacheable reasons" naming /Fp or /Yc means precompiled headers crept back in.
-      - name: sccache stats
-        run: sccache --show-stats
+      # On failure, surface the lines leading up to the first "exited with code" from the fuller
+      # MSBuild log; the whole log goes up as an artifact for anything that misses.
+      - name: Show build failure context
+        if: failure()
+        shell: pwsh
+        run: |
+          $ms = Join-Path $env:RUNNER_TEMP 'msbuild.log'
+          if (Test-Path $ms) {
+            Write-Host '::group::msbuild.log: context before the first "exited with code"'
+            Select-String -Path $ms -Pattern 'exited with code' -Context 60,2 | Select-Object -First 1 | ForEach-Object { $_.Context.PreContext; $_.Line; $_.Context.PostContext }
+            Write-Host '::endgroup::'
+          }
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: ${{ runner.temp }}/msbuild.log
+          if-no-files-found: ignore
+
+      # Port asset archives (--norom). GenerateSohOtr/Generate2ShipOtr DEPEND on ZAPD, already built
+      # above (hits). They must run before cpack — the ship/2s2h ZIP components install
+      # ${CMAKE_BINARY_DIR}/soh/soh.o2r and .../mm/2ship.o2r.
+      - name: Generate soh.o2r
+        run: cmake --build build/x64 --target GenerateSohOtr --config Release
+      - name: Generate 2ship.o2r
+        run: cmake --build build/x64 --target Generate2ShipOtr --config Release
+
+      # Hit/miss counts for the whole job. A PR that only touches a few files should show mostly
+      # direct-mode hits. "Unsupported compiler option" rising means /Zi or PCH flags crept back in.
+      - name: ccache stats
+        run: ccache --show-stats --verbose
 
       # cpack -G ZIP merges the combo/ship/2s2h components into one archive under _packages/.
       # Call cpack directly with -C Release so the multi-config generator can't package Debug by

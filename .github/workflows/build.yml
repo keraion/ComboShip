@@ -61,9 +61,6 @@ jobs:
     needs: gate
     # Pin to VS 2022 image — matches the "Visual Studio 17 2022" generator below (see build-windows.yml).
     runs-on: windows-2022
-    env:
-      # MSBuild file logger shared by the build steps below (see "Order matters").
-      MSBUILD_FLP: /flp:logfile=${{ runner.temp }}/msbuild.log;verbosity=normal;append
     steps:
       - uses: actions/checkout@v5
 
@@ -109,6 +106,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $shim | Out-Null
           Copy-Item (Get-Command ccache).Source (Join-Path $shim 'cl.exe')
           "CCACHE_CL_DIR=$($shim -replace '\\', '/')" >> $env:GITHUB_ENV
+          # MSBuild file logger shared by the build steps below (see "Order matters"). Exported here
+          # because runner.temp is not available to a job-level env block.
+          "MSBUILD_FLP=/flp:logfile=$env:RUNNER_TEMP/msbuild.log;verbosity=normal;append" >> $env:GITHUB_ENV
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1

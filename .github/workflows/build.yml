@@ -61,6 +61,13 @@ jobs:
     needs: gate
     # Pin to VS 2022 image — matches the "Visual Studio 17 2022" generator below (see build-windows.yml).
     runs-on: windows-2022
+    env:
+      # ccache needs these to cache compiles that use a precompiled header (2ship's). pch_defines
+      # and time_macros are what its manual requires for PCH; include_file_mtime/ctime stop direct
+      # mode from refusing headers whose timestamps look "too new", which on a fresh checkout is all
+      # of them. time_macros means a __DATE__ user can be served from cache, but the only ones
+      # (soh/mm src/boot/build.c) also embed the git hash, so they change, and miss, every commit.
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
     steps:
       - uses: actions/checkout@v5
 
@@ -158,17 +165,21 @@ jobs:
         #  - COMBO_RELEASE_DEBUG_INFO=OFF: no compiler debug info in Release. With /Z7 each of soh's
         #    ~1300 objects carries its own copy of the decomp type info and the Release LTCG link died
         #    with LNK1248 (image > 4 GB). The Release PDB was never packaged, so nothing shipped changes.
-        #  - CMAKE_DISABLE_PRECOMPILE_HEADERS=ON: compiler caches can't key MSVC precompiled-header
-        #    compiles (/Yc, /Yu with /Fp), and 2ship uses target_precompile_headers, so with the PCH on
-        #    every one of its ~1350 objects recompiled on every run. The root CMakeLists.txt re-adds
-        #    the PCH's headers as forced includes so the sources still see them. Cache misses for 2ship
-        #    get somewhat slower; hits make it free.
+        #  - 2ship's precompiled header stays ON. sccache refused MSVC PCH compiles outright, and
+        #    building 2ship without the PCH (its headers as forced includes instead) made every one of
+        #    its 522 C++ files re-parse the libultraship headers the PCH pre-digests: ~10 s each, a
+        #    30-minute 2ship step on a cold cache. ccache caches MSVC PCH compiles (/Yu+/Fp since
+        #    4.6.1, /Yc since 4.10) given the CCACHE_SLOPPINESS set at job level, so 2ship keeps its
+        #    fast misses and gets hits too. If the stats show 2ship never hitting on a warm run (the
+        #    .pch bytes would have to be identical run to run), the fallback is
+        #    -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON, which the root CMakeLists.txt turns into forced
+        #    includes; that trades the 30-minute cold step for free hits.
         env:
           VCPKG_ROOT: ${{ github.workspace }}/build/x64/vcpkg
         run: >-
           cmake -B build/x64 -S . -G "Visual Studio 17 2022" -A x64
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          -DCOMBO_RELEASE_DEBUG_INFO=OFF -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+          -DCOMBO_RELEASE_DEBUG_INFO=OFF
           "-DCMAKE_VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$env:CCACHE_CL_DIR;UseMultiToolTask=true;TrackFileAccess=false"
 
       # Order matters: libultraship -> soh -> 2ship (soh before 2ship; they share OTRExporter/ZAPD).

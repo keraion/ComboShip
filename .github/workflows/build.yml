@@ -94,17 +94,22 @@ jobs:
           save: ${{ github.ref_name == 'develop' }}
           key: ${{ runner.os }}-x64-${{ github.sha }}
           restore-keys: ${{ runner.os }}-x64
-      # sccache only wraps a compiler when it is either given the compiler as its first argument or
-      # is itself *named* like the compiler. MSBuild's CLToolExe hook does neither: it runs the tool
-      # with cl.exe's own arguments. So hand MSBuild a copy of sccache.exe named cl.exe, in a
-      # directory that is not on PATH; sccache sees its own name, looks up the real cl.exe on PATH
-      # (the MSVC one from msvc-dev-cmd) and proxies to it. Same trick as o3de's CompilerLauncher.cmake.
-      - name: Stage sccache as cl.exe
+      # MSBuild's CLToolExe hook runs the tool with cl.exe's own arguments (one @response-file), so
+      # the wrapper has to turn that into "sccache cl.exe <args>". A batch file does it, and also
+      # clears VS_UNICODE_OUTPUT / SARIF_OUTPUT_PIPE first: MSBuild sets those to pipe handles so
+      # cl.exe writes its diagnostics there instead of stdout. sccache forwards the variables to its
+      # server, where the handle numbers mean nothing, so every compile error came back as
+      # "cl.exe exited with code 2" with empty output. With the variables cleared cl.exe prints to
+      # stdout, sccache relays it, and MSBuild shows the real error. (Same wrapper shape as xLights CI.)
+      - name: Stage sccache cl.exe wrapper
         shell: pwsh
         run: |
           $shim = Join-Path $env:RUNNER_TEMP 'sccache-cl'
           New-Item -ItemType Directory -Force -Path $shim | Out-Null
-          Copy-Item (Get-Command sccache).Source (Join-Path $shim 'cl.exe')
+          $sccache = (Get-Command sccache).Source
+          $bat = "@echo off`r`nset VS_UNICODE_OUTPUT=`r`nset SARIF_OUTPUT_PIPE=`r`n`"$sccache`" cl.exe %*`r`n"
+          [System.IO.File]::WriteAllText((Join-Path $shim 'cl.bat'), $bat, [System.Text.Encoding]::ASCII)
+          Get-Content (Join-Path $shim 'cl.bat')
           "SCCACHE_CL_DIR=$($shim -replace '\\', '/')" >> $env:GITHUB_ENV
 
       - name: Set up MSVC
@@ -141,9 +146,9 @@ jobs:
         # breaks automate-vcpkg.cmake's git pull. Point it at the build-dir vcpkg it clones+caches.
         #
         # sccache wiring for the Visual Studio generator, which ignores CMAKE_<LANG>_COMPILER_LAUNCHER:
-        #  - CMAKE_VS_GLOBALS CLToolExe/CLToolPath make MSBuild run the sccache cl.exe shim staged
+        #  - CMAKE_VS_GLOBALS CLToolExe/CLToolPath make MSBuild run the sccache cl.bat wrapper staged
         #    above in place of the real cl.exe. CMake's compiler-identification project inherits these
-        #    globals too, so the shim has to work before the first try_compile.
+        #    globals too, so the wrapper has to work before the first try_compile.
         #  - UseMultiToolTask=true: with /MP (set globally in CMakeLists.txt) the CL task would pass
         #    every source to one cl.exe invocation, which sccache refuses to cache. MultiToolTask
         #    invokes the tool once per file and parallelises in MSBuild instead.
@@ -158,14 +163,15 @@ jobs:
         #  - CMAKE_DISABLE_PRECOMPILE_HEADERS=ON: sccache cannot cache MSVC precompiled-header compiles
         #    (/Yc, /Yu with /Fp), and 2ship uses target_precompile_headers, so without this every one
         #    of its ~1500 objects recompiled on every run ("Non-cacheable reasons: /Fp" in the stats).
-        #    Cache misses for 2ship get somewhat slower; hits make it free.
+        #    The root CMakeLists.txt re-adds the PCH's headers as forced includes so the sources still
+        #    see them. Cache misses for 2ship get somewhat slower; hits make it free.
         env:
           VCPKG_ROOT: ${{ github.workspace }}/build/x64/vcpkg
         run: >-
           cmake -B build/x64 -S . -G "Visual Studio 17 2022" -A x64
           -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCOMBO_RELEASE_DEBUG_INFO=OFF -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
-          "-DCMAKE_VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$env:SCCACHE_CL_DIR;UseMultiToolTask=true;TrackFileAccess=false"
+          "-DCMAKE_VS_GLOBALS=CLToolExe=cl.bat;CLToolPath=$env:SCCACHE_CL_DIR;UseMultiToolTask=true;TrackFileAccess=false"
 
       # One msbuild invocation for everything: the ci-all umbrella (root CMakeLists.txt) pulls in
       # libultraship, soh, 2ship, comboui, ComboShip, the comborando validator and the soh.o2r /
@@ -199,7 +205,7 @@ jobs:
           $sl = Join-Path $env:RUNNER_TEMP 'sccache-server.log'
           if (Test-Path $sl) {
             Write-Host '::group::sccache-server.log: error/failed lines (last 60)'
-            Select-String -Path $sl -Pattern 'ERROR|WARN|failed|error:' | Select-Object -Last 60 | ForEach-Object { $_.Line }
+            Select-String -Path $sl -Pattern '(ERROR|WARN).{0,12}sccache|Compilation failed|failed to ' | Select-Object -Last 60 | ForEach-Object { $_.Line }
             Write-Host '::endgroup::'
           }
       - name: Upload build diagnostics

@@ -4222,6 +4222,20 @@ extern "C" COMBO_EXPORT int MM_GetSharedTier(int family) try {
             return INV_CONTENT(ITEM_MASK_BUNNY) != ITEM_NONE ? 1 : 0;
         case ComboRando::SF_MASK_OF_TRUTH:
             return INV_CONTENT(ITEM_MASK_TRUTH) != ITEM_NONE ? 1 : 0;
+        // Teleport songs: Soaring is MM's own quest bit, OOT's warp songs are RandoInf-backed here.
+        case ComboRando::SF_SONG_OF_SOARING:
+            return CHECK_QUEST_ITEM(QUEST_SONG_SOARING) ? 1 : 0;
+        case ComboRando::SF_MINUET_OF_FOREST:
+        case ComboRando::SF_BOLERO_OF_FIRE:
+        case ComboRando::SF_SERENADE_OF_WATER:
+        case ComboRando::SF_REQUIEM_OF_SPIRIT:
+        case ComboRando::SF_NOCTURNE_OF_SHADOW:
+        case ComboRando::SF_PRELUDE_OF_LIGHT:
+            // RANDO_INF_OBTAINED_SONG_MINUET.. and the SF_ rows are both in OOT warp-index order.
+            return Flags_GetRandoInf(
+                       (RandoInf)(RANDO_INF_OBTAINED_SONG_MINUET + (family - ComboRando::SF_MINUET_OF_FOREST)))
+                       ? 1
+                       : 0;
         default:
             return 0;
     }
@@ -4301,6 +4315,18 @@ extern "C" COMBO_EXPORT void MM_RaiseSharedTier(int family, int tier) try {
                 break;
             case ComboRando::SF_MASK_OF_TRUTH:
                 base = RI_MASK_TRUTH;
+                break;
+            case ComboRando::SF_SONG_OF_SOARING:
+                base = RI_SONG_SOARING;
+                break;
+            case ComboRando::SF_MINUET_OF_FOREST:
+            case ComboRando::SF_BOLERO_OF_FIRE:
+            case ComboRando::SF_SERENADE_OF_WATER:
+            case ComboRando::SF_REQUIEM_OF_SPIRIT:
+            case ComboRando::SF_NOCTURNE_OF_SHADOW:
+            case ComboRando::SF_PRELUDE_OF_LIGHT:
+                // RI_SONG_MINUET..PRELUDE are contiguous in the same order as the SF_ rows.
+                base = (RandoItemId)(RI_SONG_MINUET + (family - ComboRando::SF_MINUET_OF_FOREST));
                 break;
             default:
                 break;

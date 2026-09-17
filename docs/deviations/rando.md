@@ -1839,8 +1839,42 @@ in Termina asks "Warp to X?" and switches games to that warp pad. Both are opt-i
 (OOT: `RSK_SONG_OF_SOARING_OOT`, "Song of Soaring (soar to Termina)"; MM: `RO_SHUFFLE_SONG_WARP_SONGS`,
 "OoT Warp Songs" in the Extra Songs card), out of logic on purpose: neither oracle can express
 cross-game access, and a route logic does not know only makes a seed more open, never less beatable.
-Standalone on develop; the shared-items table (Epona's/Storms/Time) is separate work. Not shared items:
-OOT's Song of Soaring and MM's are two items (the combined fill suffixes the name collision).
+By default OOT's Song of Soaring and MM's are two items (the combined fill suffixes the name collision),
+and so are each game's copies of the warp songs; the Shared Items toggles below merge them.
+
+**Shared teleport songs (2026-09-17, builds on the Shared Items table).** Seven new rows in
+`combo/rando/SharedItems.h`, appended after the masks (the spoiler persists keys, not indices, so old
+seeds are unaffected): `SF_SONG_OF_SOARING` (key `songOfSoaring`, CVar `gCombo.Rando.Shared.SongOfSoaring`)
+and `SF_MINUET_OF_FOREST`..`SF_PRELUDE_OF_LIGHT` (keys `minuetOfForest`, `boleroOfFire`, `serenadeOfWater`,
+`requiemOfSpirit`, `nocturneOfShadow`, `preludeOfLight`). All are plain two-way, single-tier,
+`mmHasItem` families whose `ootName == mmName`, so the generator trim, the MM-oracle mirror (MM logic
+really needs Soaring; the warp songs are out of logic so their mirror is inert), the no-suffix naming
+and the launcher reconcile needed no change.
+- **One toggle for six rows.** The warp rows share one CVar (`gCombo.Rando.Shared.WarpSongs`, label
+  "Shared Warp Songs"), mirroring MM's single "OoT Warp Songs" option. `SOH_ReadComboSharedCVars` sets
+  all six bits from it unchanged; `ComboMenu.cpp` skips a row whose CVar equals the previous row's, so a
+  shared-CVar group must stay contiguous. They remain six families so the effective mask is exact per
+  song (OOT starting with one song leaves only that song unshared) and `--shared-items` can name them
+  individually.
+- **Both games' features must be on; the existing skip rules enforce it.** Soaring with OOT's
+  `RSK_SONG_OF_SOARING_OOT` off (or started with) -> "OOT pool has none, left MM copies alone". Warp songs
+  with MM's `RO_SHUFFLE_SONG_WARP_SONGS` off -> "MM pool has none of '...', not shared" (that log line is
+  the name-drift alarm; here it is the expected outcome, and the menu footer states the requirement).
+  An effective family therefore implies both runtime gates (`ComboOwlWarp.cpp`, `WarpSongs.cpp`) are open.
+- **Tier ABI.** OOT: `RAND_INF_HAS_SONG_OF_SOARING` / `RG_SONG_OF_SOARING`, and `QUEST_SONG_MINUET + n` /
+  `RG_MINUET_OF_FOREST`.. . MM: `QUEST_SONG_SOARING` / `RI_SONG_SOARING`, and
+  `RANDO_INF_OBTAINED_SONG_MINUET + n` / `RI_SONG_MINUET + n`. The `+ n` forms rely on the SF rows, OOT's
+  quest bits, MM's RI block and MM's RandoInf block all being contiguous in OOT warp-index order.
+- **Known-gap check (see Shared Items):** MM's Song of Soaring sits on an `RCTYPE_SONG` check exactly like
+  the already-shared Epona's Song, and the warp songs only ever enter MM through `GeneratePools`; none is
+  confined-placed, so the trim's `advItems`-only scan is sufficient.
+- **MM item-location hints for shared families (`combo/rando/CrossHints.h`).** With MM's copy trimmed,
+  `Rando::GetItemLocationHintName(RI_SONG_SOARING)` (the swamp engraving, `RO_HINTS_SONG_OF_SOARING`)
+  found no placement and no `hints.mm.itemLocations` entry and said "in an Unknown Location"; the Zora's
+  Hookshot hint had the same hole since Shared Items landed. `Generate` now fills
+  `mmItemLocations[mmName]` for every effective `mmHasItem` family from the first placed OOT copy ("in
+  <area> (OOT)", or MM's own region text when it sits at an MM check). RNG-free, so the fill and hint
+  streams are unchanged.
 
 **Entrance-targeted handoff (launcher + both DLLs).** The portal always landed in South Clock Town /
 outside the Mask Shop. Now the leaving game can stage an arrival entrance: `Combo_RequestCrossSwitch(

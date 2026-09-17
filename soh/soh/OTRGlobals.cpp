@@ -3290,6 +3290,17 @@ extern "C" COMBO_EXPORT int SOH_GetSharedTier(int family) try {
             return Flags_GetRandomizerInf(RAND_INF_CHILD_TRADES_HAS_MASK_BUNNY) ? 1 : 0;
         case ComboRando::SF_MASK_OF_TRUTH:
             return Flags_GetRandomizerInf(RAND_INF_CHILD_TRADES_HAS_MASK_TRUTH) ? 1 : 0;
+        // Teleport songs: OOT's Song of Soaring is RandInf-backed, the warp songs are its own quest bits.
+        case ComboRando::SF_SONG_OF_SOARING:
+            return Flags_GetRandomizerInf(RAND_INF_HAS_SONG_OF_SOARING) ? 1 : 0;
+        case ComboRando::SF_MINUET_OF_FOREST:
+        case ComboRando::SF_BOLERO_OF_FIRE:
+        case ComboRando::SF_SERENADE_OF_WATER:
+        case ComboRando::SF_REQUIEM_OF_SPIRIT:
+        case ComboRando::SF_NOCTURNE_OF_SHADOW:
+        case ComboRando::SF_PRELUDE_OF_LIGHT:
+            // QUEST_SONG_MINUET..PRELUDE and the SF_ rows are both contiguous in OOT warp-index order.
+            return CHECK_QUEST_ITEM(QUEST_SONG_MINUET + (family - ComboRando::SF_MINUET_OF_FOREST)) ? 1 : 0;
         default:
             return 0;
     }
@@ -3362,6 +3373,27 @@ extern "C" COMBO_EXPORT void SOH_RaiseSharedTier(int family, int tier) try {
                 break;
             case ComboRando::SF_MASK_OF_TRUTH:
                 rg = RG_MASK_OF_TRUTH;
+                break;
+            case ComboRando::SF_SONG_OF_SOARING:
+                rg = RG_SONG_OF_SOARING;
+                break;
+            case ComboRando::SF_MINUET_OF_FOREST:
+                rg = RG_MINUET_OF_FOREST;
+                break;
+            case ComboRando::SF_BOLERO_OF_FIRE:
+                rg = RG_BOLERO_OF_FIRE;
+                break;
+            case ComboRando::SF_SERENADE_OF_WATER:
+                rg = RG_SERENADE_OF_WATER;
+                break;
+            case ComboRando::SF_REQUIEM_OF_SPIRIT:
+                rg = RG_REQUIEM_OF_SPIRIT;
+                break;
+            case ComboRando::SF_NOCTURNE_OF_SHADOW:
+                rg = RG_NOCTURNE_OF_SHADOW;
+                break;
+            case ComboRando::SF_PRELUDE_OF_LIGHT:
+                rg = RG_PRELUDE_OF_LIGHT;
                 break;
             default:
                 break;

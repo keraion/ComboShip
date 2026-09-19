@@ -67,7 +67,10 @@ Notes:
   fits a 16 GB machine; scale jobs to roughly RAM/4 GB, not core count.
 - **ccache** is worth setting up for iteration: add
   `-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache`
-  to the configure line.
+  to the configure line, and export
+  `CCACHE_SLOPPINESS=pch_defines,time_macros` when building. 2ship uses a
+  precompiled header, and without that setting ccache treats every 2ship
+  compile (about half the tree) as uncacheable.
 - `comborando` (headless seed validator) is an optional extra target.
 
 ### Run

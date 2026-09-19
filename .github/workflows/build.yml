@@ -3,6 +3,11 @@ name: Build (reusable)
 # Reusable Windows build pipeline: full Release build + cpack ZIP. Called by build-artifacts.yml
 # (which runs the `gate` job first) and release.yml (v* tags, no gate — merged code). See
 # docs/UPSTREAM_MERGES.md and CMake/CPackProjectConfig.cmake (the combo/ship/2s2h ZIP components).
+#
+# Compile caching: every develop build (a push, or the scheduled cache-seed.yml) saves a ccache
+# object cache; PR and tag builds restore the newest develop cache and only recompile what their
+# diff touches. ccache keys on source + header
+# content, so a stale or evicted cache costs time, never correctness. See the ccache steps below.
 
 on:
   workflow_call:
@@ -18,13 +23,55 @@ on:
       validator:
         type: boolean
         default: false
+      # Compile only: skip cpack, staging and every upload. cache-seed.yml sets this, since it runs
+      # the build purely to refresh develop's ccache entry and its artifacts would be noise.
+      cache_only:
+        type: boolean
+        default: false
 
 jobs:
   build:
-    # Pin to VS 2022 image — matches the "Visual Studio 17 2022" generator below (see build-windows.yml).
+    # Pin to the VS 2022 image: msvc-dev-cmd below picks up its MSVC toolset.
     runs-on: windows-2022
+    env:
+      # 2ship compiles against a precompiled header; ccache only caches PCH compiles with
+      # pch_defines + time_macros set (same as build-linux.yml). include_file_mtime/ctime stop direct
+      # mode from distrusting headers whose timestamps look "too new", which on a fresh checkout is
+      # all of them. time_macros lets a __DATE__ user be served from cache; the only ones (soh/mm
+      # src/boot/build.c) also embed the commit hash, so they change, and miss, every commit.
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+      # Depend mode: on a miss ccache takes the include list from cl's /showIncludes output (which
+      # Ninja requests anyway) instead of running the preprocessor a second time.
+      CCACHE_DEPEND: "1"
+      # Off by default on Windows. A direct-mode hit has to hash every header the object depends on,
+      # and ~3000 objects share the same few hundred headers; the inode cache hashes each header
+      # once per job. Measured on a full warm rebuild: 906 CPU-seconds of hit overhead with it,
+      # 2402 without.
+      CCACHE_INODECACHE: "true"
     steps:
       - uses: actions/checkout@v5
+
+      # Compiler cache. The old whole-build-dir actions/cache never gave incremental builds: a fresh
+      # checkout stamps every source newer than any cached .obj, so everything recompiled (~30 min)
+      # even on an exact key hit. ccache keys on content instead, so restoring develop's cache turns
+      # a PR build into a compile of only the files the PR touches, plus the links.
+      # Only develop saves (one entry per push; older entries age out of the repo's 10 GB cache
+      # budget least-recently-used first); PRs and v* tags restore the newest develop entry.
+      #
+      # Keys: the action prefixes both keys with "ccache-" and, with append-timestamp (default on),
+      # appends "-<timestamp>" to the save key and "-" to each restore key. So restore-keys must NOT
+      # end in "-" itself, or it never matches a saved entry.
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2.22
+        with:
+          variant: ccache
+          max-size: "5G"
+          # Drop entries this job did not touch before saving, so the saved cache stays one build's
+          # worth (~2 GB of LTCG objects) instead of growing to max-size over successive pushes.
+          evict-old-files: job
+          save: ${{ github.ref == 'refs/heads/develop' }}
+          key: ${{ runner.os }}-x64-ninja-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-x64-ninja
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -37,20 +84,51 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Shared with the compile gate: caches the expensive vcpkg build + CMake tree.
-      - name: Cache build dir (vcpkg + CMake)
+      # The expensive vcpkg dependency build (sdl2, glew, libzip, spdlog, ...), which
+      # automate-vcpkg.cmake clones + installs under build/x64/vcpkg. Only that tree is kept: vcpkg's
+      # buildtrees/downloads/packages are scratch, and the rest of build/x64 (objects, CMake tree) is
+      # covered by ccache above. The old 2.6 GB whole-build-dir (build-x64-*) entries cannot seed
+      # this: a cache entry only restores under the exact path list it was saved with, and their
+      # Visual Studio CMakeCache.txt would break a Ninja configure anyway. So the first run after
+      # this change rebuilds vcpkg once (~5-10 min).
+      - name: Cache vcpkg
         uses: actions/cache@v5
         with:
-          path: build/x64
-          key: build-x64-${{ hashFiles('CMakeLists.txt', 'CMake/**', 'libultraship/cmake/**') }}
-          restore-keys: build-x64-
+          path: |
+            build/x64/vcpkg
+            !build/x64/vcpkg/buildtrees
+            !build/x64/vcpkg/downloads
+            !build/x64/vcpkg/packages
+          key: vcpkg-x64-${{ hashFiles('CMakeLists.txt', 'CMake/**', 'libultraship/cmake/**') }}
+          restore-keys: vcpkg-x64-
 
       - name: Configure
         # See build-windows.yml: vcvars points VCPKG_ROOT at the (non-git) VS-bundled vcpkg, which
         # breaks automate-vcpkg.cmake's git pull. Point it at the build-dir vcpkg it clones+caches.
+        #
+        # Ninja Multi-Config rather than the Visual Studio generator, which is what makes the cache
+        # practical (upstream soh/2ship CI builds Windows with Ninja too):
+        #  - The VS generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER. Routing ccache through MSBuild
+        #    needs a cl.exe shim plus UseMultiToolTask/TrackFileAccess=false, which turns off
+        #    MSBuild's up-to-date checks: every later `cmake --build` step then re-ran its whole
+        #    dependency tree and re-linked soh.dll/2ship.dll (LTCG, minutes each). Tried on
+        #    ci/ccache-pch: 50 min cold. Ninja honours the launcher natively and keeps its own
+        #    up-to-date checks, so the per-target steps below cost nothing extra.
+        #  - Multi-Config (not plain Ninja) keeps CMAKE_CONFIGURATION_TYPES, $<CONFIG> and
+        #    `--config Release` working exactly as under VS: the per-project DefaultCXX.cmake props and
+        #    the x64/Release output directories are all keyed per configuration.
+        #  - CMAKE_<LANG>_COMPILER=cl: the runner also has MinGW gcc on PATH.
+        #  - COMBO_RELEASE_DEBUG_INFO=OFF: no compiler debug info in Release. A compiler cache needs
+        #    /Z7 (ccache refuses /Zi), and with /Z7 each of soh's ~1300 objects carries its own copy
+        #    of the decomp type info: the Release LTCG link died with LNK1248 (image > 4 GB). The
+        #    Release PDB was never packaged, so nothing shipped changes.
         env:
           VCPKG_ROOT: ${{ github.workspace }}/build/x64/vcpkg
-        run: cmake -B build/x64 -S . -G "Visual Studio 17 2022" -A x64
+        run: >-
+          cmake -B build/x64 -S . -G "Ninja Multi-Config"
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCOMBO_RELEASE_DEBUG_INFO=OFF
 
       # Order matters: libultraship -> soh -> 2ship (soh before 2ship; they share OTRExporter/ZAPD).
       # comboui + ComboShip pull the rest of the runtime in as dependencies.
@@ -79,10 +157,16 @@ jobs:
       - name: Generate 2ship.o2r
         run: cmake --build build/x64 --target Generate2ShipOtr --config Release
 
+      # Hit/miss counts for the whole job. A PR that touches a few files should show mostly direct
+      # hits. A large "Uncacheable" count means /Zi or an unsupported flag crept back in.
+      - name: ccache stats
+        run: ccache --show-stats --verbose
+
       # cpack -G ZIP merges the combo/ship/2s2h components into one archive under _packages/.
       # Call cpack directly with -C Release so the multi-config generator can't package Debug by
       # mistake (the build-tree CPackConfig.cmake carries CPACK_PROJECT_CONFIG_FILE from configure).
       - name: Package (cpack ZIP)
+        if: ${{ !inputs.cache_only }}
         working-directory: build/x64
         run: cpack -G ZIP -C Release
 
@@ -90,12 +174,14 @@ jobs:
       # uploading the .zip directly yields a zip-inside-a-zip; uploading the extracted tree makes the
       # downloaded ComboShip-windows.zip hold the runtime files directly.
       - name: Stage package contents
+        if: ${{ !inputs.cache_only }}
         shell: pwsh
         run: |
           $zip = Get-ChildItem _packages/*.zip | Select-Object -First 1
           Expand-Archive -Path $zip.FullName -DestinationPath _packages/stage -Force
 
       - name: Upload ComboShip artifact
+        if: ${{ !inputs.cache_only }}
         uses: actions/upload-artifact@v4
         with:
           name: ComboShip-windows
@@ -104,7 +190,7 @@ jobs:
 
       # The raw cpack .zip (not the staged tree) for release.yml to attach directly as a Release asset.
       - name: Upload package zip (release asset)
-        if: inputs.release_zip
+        if: ${{ inputs.release_zip && !inputs.cache_only }}
         uses: actions/upload-artifact@v4
         with:
           name: ComboShip-package-zip
@@ -114,7 +200,7 @@ jobs:
       # comborando.exe + its deployed runtime DLLs (no o2r — the reachability oracle needs none).
       # validate-seed.yml downloads this from the latest successful develop run instead of rebuilding.
       - name: Upload comborando validator
-        if: inputs.validator
+        if: ${{ inputs.validator && !inputs.cache_only }}
         uses: actions/upload-artifact@v4
         with:
           name: comborando-windows

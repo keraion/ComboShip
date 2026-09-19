@@ -1,0 +1,109 @@
+name: Cache seed
+
+# Keeps develop's compiler caches warm so PR builds (build-artifacts.yml) restore a useful one.
+#
+# Why develop: a run can only restore caches saved on its own branch, its PR base branch, or the
+# default branch. Every PR targets develop, which is also the default branch, so that is the one
+# place a cache is visible to all of them. An entry saved on `main` (the release branch) would not
+# be restorable from a PR into develop. build.yml / build-linux.yml only save when the ref is
+# develop, and a scheduled run always uses the default branch.
+#
+# develop pushes already save a cache as a side effect of the nightly build. This workflow covers
+# the gaps that leave PRs cold for a full ~30 min build:
+#  - the first seeding after a cache-layout change, without waiting for a merge (run it manually);
+#  - GitHub evicting entries nobody restored for 7 days, or to stay inside the repo's 10 GB budget;
+#  - a runner image update changing the compiler, which misses every cached object until the next
+#    develop build re-fills the cache.
+#
+# It calls the normal build pipelines with cache_only, so it compiles (restoring, then saving, the
+# ccache entry) and skips packaging and uploads. It is a separate file on purpose: validate-seed.yml
+# picks develop runs of build-artifacts.yml by file name and pr-artifacts.yml listens for the
+# "Build Artifacts" workflow name, and neither should ever see these runs.
+
+on:
+  schedule:
+    # Daily, off the hour (scheduled runs queue badly at :00). Most days `plan` finds a fresh entry
+    # for develop's head and the builds are skipped, so this costs a few seconds.
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and save even if develop's head already has a fresh cache entry
+        type: boolean
+        default: false
+
+concurrency:
+  group: cache-seed
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    # Scheduled runs also fire on forks that have Actions enabled; only the real repo needs seeding.
+    # A manual run is always allowed (e.g. to seed a fork used for CI experiments).
+    if: github.repository == 'Varuuna/ComboShip' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    outputs:
+      windows: ${{ steps.check.outputs.windows }}
+      linux: ${{ steps.check.outputs.linux }}
+    steps:
+      - name: Find fresh cache entries for this commit
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          FORCE: ${{ inputs.force }}
+          # Seed again once the newest entry for this commit is older than this. GitHub evicts an
+          # entry after 7 days without a restore, and a runner image update (roughly weekly) can
+          # change the compiler; re-seeding at 4 days stays ahead of both.
+          MAX_AGE_DAYS: '4'
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/develop" ]; then
+            echo "::warning::Running on $REF: build.yml / build-linux.yml only save from refs/heads/develop, so this run will not seed anything."
+          fi
+          now=$(date -u +%s)
+          # The ccache action stores keys as "ccache-<key>-<timestamp>"; the API's key filter is a
+          # prefix match, so this finds every entry saved for this commit.
+          check() { # $1 = output name, $2 = key prefix
+            local created age=""
+            created=$(gh api --method GET "repos/$REPO/actions/caches" \
+              -f key="$2" -f ref="$REF" -f sort=created_at -f direction=desc -F per_page=1 \
+              --jq '.actions_caches[0].created_at // ""')
+            if [ -n "$created" ]; then
+              age=$(( (now - $(date -u -d "$created" +%s)) / 86400 ))
+            fi
+            if [ "$FORCE" = "true" ]; then
+              echo "$1: forced" | tee -a "$GITHUB_STEP_SUMMARY"; echo "$1=true" >> "$GITHUB_OUTPUT"
+            elif [ -z "$created" ]; then
+              echo "$1: no entry for ${SHA:0:9}, seeding" | tee -a "$GITHUB_STEP_SUMMARY"; echo "$1=true" >> "$GITHUB_OUTPUT"
+            elif [ "$age" -ge "$MAX_AGE_DAYS" ]; then
+              echo "$1: entry for ${SHA:0:9} is $age days old, re-seeding" | tee -a "$GITHUB_STEP_SUMMARY"; echo "$1=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$1: entry for ${SHA:0:9} is $age days old, fresh enough, skipping" | tee -a "$GITHUB_STEP_SUMMARY"; echo "$1=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          # Must match the `key:` inputs of the ccache steps in build.yml and build-linux.yml.
+          check windows "ccache-Windows-x64-ninja-$SHA"
+          check linux "ccache-Linux-linux-ccache-$REF-$SHA"
+
+  windows:
+    needs: plan
+    if: needs.plan.outputs.windows == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      cache_only: true
+      # develop's nightly build compiles comborando too, so seed its objects as well.
+      validator: true
+
+  linux:
+    needs: plan
+    if: needs.plan.outputs.linux == 'true'
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      cache_only: true

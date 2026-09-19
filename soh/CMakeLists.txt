@@ -231,6 +231,58 @@ set(ALL_FILES
 add_library(${PROJECT_NAME} SHARED ${ALL_FILES})
 target_compile_definitions(${PROJECT_NAME} PRIVATE SOH_BUILD_DLL)
 
+################################################################################
+# Precompiled Headers
+################################################################################
+# ComboShip: soh had no precompiled header, so each of its ~450 C++ sources re-parsed the
+# libultraship/spdlog/standard-library/game headers (a 190-line source expands to ~180k lines).
+# Measured on a cold MSVC Release build: 5340 CPU-s of C++ compiles without this block, 1266 with it
+# (median file 12.7 s -> 1.5 s), which takes the soh step from 417 s to 194 s. The list mirrors the
+# block in mm/CMakeLists.txt. -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON turns it off.
+#
+# MSVC only. With GCC the front end is only about a third of each compile (the rest is optimising
+# template-heavy code) and loading the PCH costs about what it saves: a Linux build measured 4240
+# CPU-s without it and 4628 with it.
+#
+# C++ only. The decomp C sources (src/) are compiled with a per-source ${WARNING_OVERRIDE} while
+# the target uses /W3 /WX; a PCH restores its own warning state, so ~570 C files fail with C2220.
+if (MSVC)
+    target_precompile_headers(${PROJECT_NAME} PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:<libultraship/bridge/consolevariablebridge.h$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<ship/Context.h$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<ship/resource/ResourceManager.h$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<ship/window/Window.h$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<spdlog/spdlog.h$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<string$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<vector$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<map$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<unordered_map$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<filesystem$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<fstream$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<algorithm$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<functional$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:<variant$<ANGLE-R>>"
+        "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/soh/Enhancements/game-interactor/GameInteractor.h>"
+        "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/variables.h>"
+        "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/functions.h>"
+        "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/macros.h>"
+        "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/z64.h>"
+        # Expensive to parse and included by the GUI sources, which were the slowest files left
+        # (~29 s each). SohGui.hpp is deliberately NOT here: it is an umbrella over every window
+        # header, so any GUI header edit would rebuild all of soh.
+        "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/soh/SohGui/UIWidgets.hpp>"
+    )
+
+    # randomizerEnums.h is an X-macro header with no include guard, and these two sources include
+    # it directly (randomizerEnumStrings.cpp several times, under different macro definitions). The
+    # PCH has already expanded it once through GameInteractor.h, so with it they redefine every enum.
+    set_source_files_properties(
+        soh/Enhancements/randomizer/randomizerEnumStrings.cpp
+        soh/config/ConfigUpdaters.cpp
+        PROPERTIES SKIP_PRECOMPILE_HEADERS ON
+    )
+endif()
+
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
 use_props(${PROJECT_NAME} "${CMAKE_CONFIGURATION_TYPES}" "${DEFAULT_CXX_PROPS}")
 endif()

@@ -45,8 +45,8 @@ jobs:
             libzip-dev zipcmp zipmerge ziptool
 
       # ~2600 objects across lus/soh/2ship/combo: ccache is the difference between ~90 min cold
-      # and a few minutes warm. Only develop saves, whatever the trigger (push, the scheduled
-      # cache-seed.yml, or a manual dispatch), so PR runs can't pollute it. A PR can only restore
+      # and a few minutes warm. Only develop saves, whatever the trigger (a push, or a
+      # manual cache-seed.yml run), so PR runs can't pollute it. A PR can only restore
       # caches from its own branch, its base branch or the default branch, which is why the entry
       # has to come from develop.
       - name: Configure ccache

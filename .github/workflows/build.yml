@@ -4,7 +4,7 @@ name: Build (reusable)
 # (which runs the `gate` job first) and release.yml (v* tags, no gate — merged code). See
 # docs/UPSTREAM_MERGES.md and CMake/CPackProjectConfig.cmake (the combo/ship/2s2h ZIP components).
 #
-# Compile caching: every develop build (a push, or the scheduled cache-seed.yml) saves a ccache
+# Compile caching: every develop build (a push, or a manual cache-seed.yml run) saves a ccache
 # object cache; PR and tag builds restore the newest develop cache and only recompile what their
 # diff touches. ccache keys on source + header
 # content, so a stale or evicted cache costs time, never correctness. See the ccache steps below.

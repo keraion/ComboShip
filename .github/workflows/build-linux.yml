@@ -11,6 +11,12 @@ name: Build (Linux)
 
 on:
   workflow_call:
+    inputs:
+      # Compile only: skip the smoke test, AppImage packaging and every upload. cache-seed.yml sets
+      # this, since it runs the build purely to refresh develop's ccache entry.
+      cache_only:
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -39,11 +45,14 @@ jobs:
             libzip-dev zipcmp zipmerge ziptool
 
       # ~2600 objects across lus/soh/2ship/combo: ccache is the difference between ~90 min cold
-      # and a few minutes warm. Cache is only saved on branch pushes so PR runs can't pollute it.
+      # and a few minutes warm. Only develop saves, whatever the trigger (push, the scheduled
+      # cache-seed.yml, or a manual dispatch), so PR runs can't pollute it. A PR can only restore
+      # caches from its own branch, its base branch or the default branch, which is why the entry
+      # has to come from develop.
       - name: Configure ccache
         uses: hendrikmuhs/ccache-action@v1.2.22
         with:
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/develop' }}
           key: ${{ runner.os }}-linux-ccache-${{ github.ref }}-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-linux-ccache-${{ github.ref }}
@@ -88,6 +97,7 @@ jobs:
       # can't. Runs from the deploy dir because the tool dlopens ./libsoh.so & ./lib2ship.so.
       # Fixed seed keeps failures reproducible; exit code is the verdict (0 = beatable).
       - name: Smoke-test seed generation (comborando)
+        if: ${{ !inputs.cache_only }}
         working-directory: build-cmake/combo
         run: ./comborando --seed ci-linux-smoke --count 1
 
@@ -96,9 +106,11 @@ jobs:
       # self-contained AppImage — linuxdeploy bundles the system .so deps and combo/linux/AppRun
       # recreates the launcher's portable cwd layout in a writable data dir at run time.
       - name: Stage Linux package + build AppImage
+        if: ${{ !inputs.cache_only }}
         run: ./scripts/linux/make-appimage.sh build-cmake _packages
 
       - name: Upload ComboShip-linux artifact
+        if: ${{ !inputs.cache_only }}
         uses: actions/upload-artifact@v4
         with:
           name: ComboShip-linux
@@ -108,6 +120,7 @@ jobs:
       # GitHub zips artifact contents on download, which drops the exec bit — the docs tell users
       # to chmod +x the AppImage after unzipping (standard for CI-distributed AppImages).
       - name: Upload ComboShip-linux AppImage
+        if: ${{ !inputs.cache_only }}
         uses: actions/upload-artifact@v4
         with:
           name: ComboShip-linux-appimage

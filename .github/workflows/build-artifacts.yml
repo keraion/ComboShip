@@ -29,7 +29,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Never cancel a develop push mid-flight: the Linux ccache only saves on push, and validate-seed
+  # Never cancel a develop push mid-flight: both ccaches only save from develop, and validate-seed
   # depends on develop producing a successful run.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

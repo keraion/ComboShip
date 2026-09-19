@@ -18,6 +18,13 @@ jobs:
     # tinyxml2 10.0), which are new enough that upstream 2ship's source-built SDL/tinyxml2 steps
     # (a jammy workaround) aren't needed here.
     runs-on: ubuntu-24.04
+    env:
+      # 2ship compiles against a precompiled header (target_precompile_headers in mm/CMakeLists.txt),
+      # and ccache refuses every PCH-using compile unless these two are set. Without them all ~1345
+      # of 2ship's objects were "uncacheable" and the 2ship step cost ~8 min even on a warm cache.
+      # time_macros lets a __DATE__/__TIME__ user be served from cache; the only ones
+      # (soh/mm src/boot/build.c) also embed the commit hash, so they change, and miss, every commit.
+      CCACHE_SLOPPINESS: pch_defines,time_macros
     steps:
       - uses: actions/checkout@v5
 

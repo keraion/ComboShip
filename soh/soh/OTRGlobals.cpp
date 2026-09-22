@@ -3006,8 +3006,9 @@ extern "C" COMBO_EXPORT void SOH_Anchor_RequestTeleport(uint32_t clientId) {
 // ComboShip: cross-game item delivery seam (issue #3). When the other game collects a check whose
 // item belongs to OOT, the launcher calls SOH_GrantCrossItem to grant it straight into OOT's
 // resident save — even when OOT is the dormant (frozen) game. We use Randomizer_Item_Give, which
-// writes gSaveContext directly and is play-state-independent (Magic_Fill ignores `play`,
-// Rupees_ChangeBy null-guards gPlayState), so it is safe against a frozen gPlayState. The save is
+// writes gSaveContext directly and is play-state-independent (Magic_Fill ignores `play`;
+// Rupees_ChangeBy's null-gPlayState branch writes rupees directly, bypassing Interface_Update's wallet
+// cap, so it is clamped there under COMBO_BUILD), so it is safe against a frozen gPlayState. The save is
 // persisted immediately so the item survives quitting before ever switching into OOT. See
 // docs/UPSTREAM_MERGES.md.
 // ComboShip: save-only side effects RandomizerOnItemReceiveHandler applies on a normal pickup

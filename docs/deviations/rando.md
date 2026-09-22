@@ -384,12 +384,9 @@ sides and never touch `gPlayState`, so a frozen dormant play state is safe — M
 `Item_Give` paths stage onto a live play state).
 
 **Dormant rupee cap (`soh/src/code/z_parameter.c`, COMBO_BUILD-guarded):** `Rupees_ChangeBy`'s
-null-`gPlayState` branch adds to `gSaveContext.rupees` directly, skipping the wallet cap that
-`Interface_Update` applies while draining the accumulator. Every OOT-owned rupee MM finds takes that
-branch, so a long MM session could push the balance past 1900, where `Interface_Draw`'s hundreds digit
-indexes past the 19-entry `digitTextures[]` and the game faults on the first HUD frame of every OOT
-scene load (v0.2.1 player report, 2026-09-21). This now clamps to `CUR_CAPACITY(UPG_WALLET)`, and
-`Interface_Update` clamps once more before the draw so a save that already overflowed self-heals.
+null-`gPlayState` branch skips the wallet cap, so MM-found OOT rupees could push the balance past 1900
+and crash `Interface_Draw` (`digitTextures[]` out of bounds). It now clamps to `CUR_CAPACITY(UPG_WALLET)`,
+and `Interface_Update` clamps again so already-overflowed saves recover.
 
 **`soh/soh/OTRGlobals.cpp` (vendored, COMBO_BUILD-guarded):** four new exports —
 `SOH_GrantCrossItem` (resolve OOT English name → `Randomizer_Item_Give` → `SaveManager::SaveFile`),

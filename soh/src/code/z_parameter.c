@@ -2957,10 +2957,7 @@ void Rupees_ChangeBy(s16 rupeeChange) {
     if (gPlayState == NULL) {
         gSaveContext.rupees += rupeeChange;
 #ifdef COMBO_BUILD
-        // ComboShip: this is the dormant cross-grant path (MM foreground, OOT parked in TitleSetup with no
-        // play state) and it bypasses Interface_Update's wallet cap. Uncapped, once a MM session pushes
-        // rupees past 1900, and Interface_Draw's hundreds digit then indexes off the end of
-        // digitTextures[] — a first-HUD-frame crashes on OOT scene load.
+        // ComboShip: Clamp rupees value to prevent interface crashing.
         if (gSaveContext.rupees > CUR_CAPACITY(UPG_WALLET)) {
             gSaveContext.rupees = CUR_CAPACITY(UPG_WALLET);
         } else if (gSaveContext.rupees < 0) {
@@ -6711,9 +6708,7 @@ void Interface_Update(PlayState* play) {
         !Play_InCsMode(play)) {}
 
 #ifdef COMBO_BUILD
-    // ComboShip: repair a save the pre-clamp dormant grant path (see Rupees_ChangeBy) already overflowed.
-    // The drain below only clamps while a positive accumulator is pending, so an overflowed balance would
-    // otherwise sit there and crash Interface_Draw on this frame.
+    // ComboShip: repair any latent unclamped rupee value.
     if (gSaveContext.rupees > CUR_CAPACITY(UPG_WALLET)) {
         gSaveContext.rupees = CUR_CAPACITY(UPG_WALLET);
     }

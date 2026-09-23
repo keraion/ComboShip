@@ -2854,8 +2854,7 @@ typedef enum {
     RI_SONG_LULLABY_INTRO,
     RI_SONG_LULLABY,
 #ifdef COMBO_BUILD
-    // ComboShip (teleport songs): OOT's warp songs as MM items. Kept inside the RI_SONG_DOUBLE_TIME..
-    // RI_SONG_TIME range the menu / item tracker use for song icon sizing; order = OOT warp index.
+    // ComboShip (teleport songs): OOT's warp songs, inside the song range used for icon sizing.
     RI_SONG_MINUET,
     RI_SONG_BOLERO,
     RI_SONG_SERENADE,

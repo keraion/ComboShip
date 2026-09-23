@@ -1132,8 +1132,7 @@ extern "C" void Randomizer_DrawOcarinaButton(PlayState* play, GetItemEntry* getI
 }
 
 #ifdef COMBO_BUILD
-// ComboShip (teleport songs): MM's Song of Soaring on the OOT host, the vanilla song-note model in MM's
-// soaring tint (Rando/DrawItem.cpp DrawSong: 200, 160, 255). Same shape as z_draw.c's GetItem_DrawXlu01.
+// ComboShip (teleport songs): MM's Song of Soaring as a song note in MM's soaring tint.
 static Gfx gGiSongOfSoaringColorDL[] = {
     gsDPPipeSync(),
     gsDPSetPrimColor(0, 0x80, 255, 255, 255, 255),

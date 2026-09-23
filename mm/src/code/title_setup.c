@@ -4,8 +4,7 @@
 #include "global.h"
 #include "BenPort.h"
 #include "2s2h/GameInteractor/GameInteractor.h"
-// Arrival override (teleport songs / debug): >= 0 means spawn at this entrance instead of South Clock
-// Town. Pushed by the launcher (MM_SetTargetEntrance), consumed once in Setup_InitImpl.
+// ComboShip (teleport songs): arrival entrance pushed by the launcher (>= 0), consumed once.
 extern int gComboTargetEntrance;
 extern int gComboCrossArrival;
 #endif
@@ -94,10 +93,7 @@ void Setup_InitImpl(SetupState* this) {
             gSaveContext.save.entrance = ENTRANCE(SOUTH_CLOCK_TOWN, 0);
         }
         if (gComboTargetEntrance >= 0) {
-            // Cross-game arrival at a requested entrance (OOT's Song of Soaring, or combo_warp_mm). Placed
-            // after the three-way branch so the owl-save side effects above still run and the override
-            // wins over every default. The launcher enters with gComboEntryIsResume == 0 on this path, so
-            // Remember Save Location was not consulted: a portal entry with a different exit.
+            // ComboShip (teleport songs): cross-game arrival; after the branch above so owl-save side effects run.
             gSaveContext.save.entrance = (u16)gComboTargetEntrance;
             gComboTargetEntrance = -1;
             gComboCrossArrival = 1;

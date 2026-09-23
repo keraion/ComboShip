@@ -200,8 +200,7 @@ static bool GiveItemHandler(std::shared_ptr<Ship::Console> Console, const std::v
 }
 
 #ifdef COMBO_BUILD
-// ComboShip (teleport songs): `combo_warp_oot <hex OOT entrance>` — save, switch to OOT and arrive at
-// that entrance (debug for the entrance-targeted handoff; e.g. 0x600 = Sacred Forest Meadow warp pad).
+// ComboShip (teleport songs): `combo_warp_oot <hex OOT entrance>`, e.g. 0x600 = Sacred Forest Meadow pad.
 static bool ComboWarpOOTHandler(std::shared_ptr<Ship::Console> Console, const std::vector<std::string>& args,
                                 std::string* output) {
     if (args.size() < 2) {

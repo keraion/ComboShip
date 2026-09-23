@@ -278,8 +278,7 @@ void GeneratePools(RandoSaveInfo& saveInfo, std::vector<RandoCheckId>& checkPool
         itemPool.push_back(RI_SONG_SARIA);
     }
 #ifdef COMBO_BUILD
-    // ComboShip (teleport songs): OOT's warp songs. Out of logic on purpose (a route logic does not know
-    // only makes a seed more open), so they are plain major items here.
+    // ComboShip (teleport songs): OOT's warp songs; only the combined fill's logic credits them.
     if (saveInfo.randoSaveOptions[RO_SHUFFLE_SONG_WARP_SONGS] == RO_GENERIC_YES) {
         for (int ri = RI_SONG_MINUET; ri <= RI_SONG_PRELUDE; ri++) {
             itemPool.push_back((RandoItemId)ri);

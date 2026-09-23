@@ -1831,108 +1831,25 @@ to the granted tier needs a new cross-game name ABI, and every other `displayNam
 tracker, hints, merchant text, MM shop descriptions) must keep the generic name or it leaks
 progression. Separate follow-up.
 
-## Cross-game teleport songs: Song of Soaring in OOT, OOT warp songs in MM (2026-09-14)
+## Cross-game teleport songs: Song of Soaring in OOT, OOT warp songs in MM
 
-**Why:** OoTMM's `songSoaringOot` / `songMinuetMm`..`songPreludeMm`. Playing MM's Song of Soaring in
-Hyrule opens Termina's owl-statue map and switches games to the chosen statue; playing an OOT warp song
-in Termina asks "Warp to X?" and switches games to that warp pad. Both are opt-in seed settings
-(OOT: `RSK_SONG_OF_SOARING_OOT`, "Song of Soaring (soar to Termina)"; MM: `RO_SHUFFLE_SONG_WARP_SONGS`,
-"OoT Warp Songs" in the Extra Songs card), out of logic on purpose: neither oracle can express
-cross-game access, and a route logic does not know only makes a seed more open, never less beatable.
-By default OOT's Song of Soaring and MM's are two items (the combined fill suffixes the name collision),
-and so are each game's copies of the warp songs; the Shared Items toggles below merge them.
+**Why:** OoTMM's `songSoaringOot` / `songMinuetMm`..`songPreludeMm`. MM's Song of Soaring played in Hyrule
+opens Termina's owl map and switches to the chosen statue; an OOT warp song played in Termina switches to
+that warp pad. Opt-in seed settings: OOT `RSK_SONG_OF_SOARING_OOT`, MM `RO_SHUFFLE_SONG_WARP_SONGS`.
 
-**Shared teleport songs (2026-09-17, builds on the Shared Items table).** Seven new rows in
-`combo/rando/SharedItems.h`, appended after the masks (the spoiler persists keys, not indices, so old
-seeds are unaffected): `SF_SONG_OF_SOARING` (key `songOfSoaring`, CVar `gCombo.Rando.Shared.SongOfSoaring`)
-and `SF_MINUET_OF_FOREST`..`SF_PRELUDE_OF_LIGHT` (keys `minuetOfForest`, `boleroOfFire`, `serenadeOfWater`,
-`requiemOfSpirit`, `nocturneOfShadow`, `preludeOfLight`). All are plain two-way, single-tier,
-`mmHasItem` families whose `ootName == mmName`, so the generator trim, the MM-oracle mirror (MM logic
-really needs Soaring; the warp songs are out of logic so their mirror is inert), the no-suffix naming
-and the launcher reconcile needed no change.
-- **One toggle for six rows.** The warp rows share one CVar (`gCombo.Rando.Shared.WarpSongs`, label
-  "Shared Warp Songs"), mirroring MM's single "OoT Warp Songs" option. `SOH_ReadComboSharedCVars` sets
-  all six bits from it unchanged; `ComboMenu.cpp` skips a row whose CVar equals the previous row's, so a
-  shared-CVar group must stay contiguous. They remain six families so the effective mask is exact per
-  song (OOT starting with one song leaves only that song unshared) and `--shared-items` can name them
-  individually.
-- **Both games' features must be on; the existing skip rules enforce it.** Soaring with OOT's
-  `RSK_SONG_OF_SOARING_OOT` off (or started with) -> "OOT pool has none, left MM copies alone". Warp songs
-  with MM's `RO_SHUFFLE_SONG_WARP_SONGS` off -> "MM pool has none of '...', not shared" (that log line is
-  the name-drift alarm; here it is the expected outcome, and the menu footer states the requirement).
-  An effective family therefore implies both runtime gates (`ComboOwlWarp.cpp`, `WarpSongs.cpp`) are open.
-- **Tier ABI.** OOT: `RAND_INF_HAS_SONG_OF_SOARING` / `RG_SONG_OF_SOARING`, and `QUEST_SONG_MINUET + n` /
-  `RG_MINUET_OF_FOREST`.. . MM: `QUEST_SONG_SOARING` / `RI_SONG_SOARING`, and
-  `RANDO_INF_OBTAINED_SONG_MINUET + n` / `RI_SONG_MINUET + n`. The `+ n` forms rely on the SF rows, OOT's
-  quest bits, MM's RI block and MM's RandoInf block all being contiguous in OOT warp-index order.
-- **Known-gap check (see Shared Items):** MM's Song of Soaring sits on an `RCTYPE_SONG` check exactly like
-  the already-shared Epona's Song, and the warp songs only ever enter MM through `GeneratePools`; none is
-  confined-placed, so the trim's `advItems`-only scan is sufficient.
-- **MM item-location hints for shared families (`combo/rando/CrossHints.h`).** With MM's copy trimmed,
-  `Rando::GetItemLocationHintName(RI_SONG_SOARING)` (the swamp engraving, `RO_HINTS_SONG_OF_SOARING`)
-  found no placement and no `hints.mm.itemLocations` entry and said "in an Unknown Location"; the Zora's
-  Hookshot hint had the same hole since Shared Items landed. `Generate` now fills
-  `mmItemLocations[mmName]` for every effective `mmHasItem` family from the first placed OOT copy ("in
-  <area> (OOT)", or MM's own region text when it sits at an MM check). RNG-free, so the fill and hint
-  streams are unchanged.
-
-**Entrance-targeted handoff (launcher + both DLLs).** The portal always landed in South Clock Town /
-outside the Mask Shop. Now the leaving game can stage an arrival entrance: `Combo_RequestCrossSwitch(
-entrance)` (OTRGlobals.cpp / BenPort.cpp) stashes it and raises the same pending flag the portal uses,
-so persistence and the launcher loop are unchanged; the launcher drains it (`SOH_/MM_GetPendingCrossTarget`,
-consume-on-read) and pushes it as a one-shot override (`SOH_/MM_SetTargetEntrance` ->
-`gComboTargetEntrance`) right before the other game's boot/resume, where `TitleSetup_InitImpl` /
-`Setup_InitImpl` honor it (OOT through `Entrance_OverrideNextIndex`, so entrance rando applies like it
-does to OOT's own warp songs; MM after the owl-save/resume branch so those side effects still run).
-`gComboCrossArrival` marks the arrival until the first OnSceneInit. Only a portal-kind (0) return applies
-the target; a reset / owl-save quit drops it. Export shape mirrors `feat/cross-entrances`. Debug:
-console `combo_warp_mm <hex>` (OOT) / `combo_warp_oot <hex>` (MM).
-
-**OOT warp songs in MM (vendored, `COMBO_BUILD`-guarded, preserve on merges).**
-- `mm/include/z64ocarina.h`: `OCARINA_SONG_MINUET..PRELUDE` = 24..29 before `OCARINA_SONG_MAX` (30) +
-  `OCARINA_SONG_IS_OOT_WARP()`. They sit past the 24-bit availability mask (`AudioOcarina_Start`
-  `& 0xFFFFFF`) and are only ever enabled through `VB_SONG_AVAILABLE_TO_PLAY`.
-- `mm/src/audio/code_8019AF00.c`: six rows each in `sOcarinaSongNotes` (copies of the OOT leftovers
-  `sOoTOcarinaSongNotes[0..5]` already in the file), `gOcarinaSongButtons` (soh's table) and
-  `sIsOcarinaSongReserved`.
-- `mm/src/code/z_message.c`: the song-played gate accepts the new ids and skips the quest-bit shift
-  (`QUEST_SONG_SONATA + 24..29` is out of range); `sOcarinaSongFanfares` is sized `[OCARINA_SONG_MAX]`
-  (it is indexed by `songPlayed` and was already read past its 17 entries); the "You played" name box
-  routes the new ids to 0x1B95 instead of `0x1B72 + id`, which lands on the Song of Time prompts that
-  ClockShuffle hooks unguarded.
-- Items are `RANDO_INF_OBTAINED_SONG_*` (Double Time pattern, `itemId = ITEM_NONE`): MM has two free
-  `questItems` bits and fixed kaleido layout tables, so no pause quest-page icon (tracker + pickup
-  only). `RI_SONG_MINUET..PRELUDE` sit inside the `RI_SONG_DOUBLE_TIME..RI_SONG_TIME` range the menu
-  and item tracker use for song icon sizing (this shifts later RI ids, like every 2Ship item insert).
-- `mm/2s2h/Rando/MiscBehavior/WarpSongs.cpp` (combo-owned): availability hook, "You played the X." and
-  "Warp to X?" both on text id 0x1B95 with a local state machine (SariasSongHint pattern, coexists
-  with its 0x1B95 hooks), refusal wherever MM refuses its own Song of Soaring (`restrictions.songOfSoaring`,
-  `Map_CurRoomHasMapI`, Secret Shrine), Yes -> `Combo_RequestCrossSwitch(ENTR_*_WARP_PAD)`.
-
-**Song of Soaring in OOT.** `RG_SONG_OF_SOARING` + `RAND_INF_HAS_SONG_OF_SOARING` (ocarina-button
-pattern: the grant is the `RandoGetToRandInf` row; one pool copy; `ITEMTYPE_ITEM` with a custom song-note
-draw in MM's soaring tint; tracker entry in the songs group; RG appended after `RG_COMBO_FOREIGN`).
-`soh/soh/Enhancements/combo/ComboOwlWarp.cpp` (combo-owned):
-- Recognition never touches OOT's ocarina tables (the u16 availability word has no free bit; every
-  per-song table is 12 wide): `OnOcarinaNote` feeds a ring, the tail is compared with F4 B4 D5 F4 B4
-  D5 (no vanilla song is a suffix of it), and the match is consumed on the main thread in
-  `OnGameFrameUpdate` (free play only). Refusals in vanilla order: `disableWarpSongs` -> 0x88C, no
-  activated statue (or MM save not resident: provider returns -1) -> "yet to leave your mark".
-- The chooser is not a kaleido page: `pauseCtx->debugState = 0x10` freezes the world (Play_Update runs
-  the inert KaleidoScopeCall_Update, START is refused), `MSGMODE_PAUSED` parks the ocarina session, and
-  `OnPlayDrawEnd` draws into OVERLAY_DISP (under HUD and textbox) inside `gSPComboRMPush("mm")`: MM's
-  CI8 Termina map + TLUT as 16 texture-rect strips (z_kaleido_map.c flat path), the dimmer, one
-  `gWorldMapOwlFaceTex` per activated statue at MM's page-space positions (screen = X+160, 121-Y), the
-  IA4 `map_name_static` plate, then OOT's own pause-cursor corners. `G_TT_NONE` is reset after the
-  palette strips. Flat, no page-roll. A -> custom two-choice prompt (debugState cleared so
-  Message_Update runs); Yes -> fade out, `OCARINA_MODE_04` (Link puts the ocarina away, vanilla B-cancel
-  shape) then `Combo_RequestCrossSwitch(MM_GetOwlWarpEntrance(id))`.
-- Cross-DLL through the launcher: `MM_GetOwlActivationFlags` / `MM_GetOwlWarpEntrance` exports,
-  `SOH_SetOwlFlagsProvider` / `SOH_SetOwlWarpEntranceProvider` callbacks (triforce-count pattern); the
-  flags provider returns -1 unless MM's resident save is the slot OOT is playing.
-
-**Verified:** Linux syntax checks of every touched translation unit against the worktree's headers;
-Windows build + in-game runs are the real check (see the commit log).
+- **Handoff.** `Combo_RequestCrossSwitch(entrance)` stages an arrival entrance; the launcher drains it
+  (`SOH_/MM_GetPendingCrossTarget`) and pushes it (`SOH_/MM_SetTargetEntrance`) before the other game's
+  boot/resume. Only portal-kind returns apply it. Debug: `combo_warp_mm` / `combo_warp_oot`.
+- **OOT warp songs in MM (vendored, guarded).** `OCARINA_SONG_MINUET..PRELUDE` = 24..29 in `z64ocarina.h`,
+  rows in `code_8019AF00.c`, `z_message.c` gate/fanfare/name-box changes; items are
+  `RANDO_INF_OBTAINED_SONG_*`. Behavior in `mm/2s2h/Rando/MiscBehavior/WarpSongs.cpp`.
+- **Song of Soaring in OOT.** `RG_SONG_OF_SOARING` / `RAND_INF_HAS_SONG_OF_SOARING`; chooser and
+  recognition in `soh/soh/Enhancements/combo/ComboOwlWarp.cpp`, owl flags read from MM through the launcher.
+- **Shared.** Seven `SharedItems.h` rows (`SF_SONG_OF_SOARING`, `SF_MINUET_OF_FOREST`..); the six warp rows
+  share one CVar. Needs both games' features on, otherwise the family is skipped.
+- **Logic.** `combo/rando/CrossWarpLogic.h`: each oracle exports `GetCrossOut` and the fill feeds it to the
+  other as `@combo:*` pseudo-owned names. OOT root warp exits accept `Logic::ComboCrossWarp(n)`; MM owl
+  exits accept `CAN_SOAR_TO_OWL`. Standalone single-game generation ignores the songs.
 
 ## Cross-placed MM junk is baked at generation (2026-09-07)
 
@@ -2029,8 +1946,9 @@ exports, Anchor packets) unchanged. Table + mask helpers: `combo/rando/SharedIte
 in the pool is left alone and not listed, even if requested). Absent key = mask 0 = feature off (old
 seeds unaffected; no save-format change, no `COMBO_RELEASE_VERSION` bump, spoiler `version` stays 1).
 
-**Skip rule:** a mask family whose OOT pool holds none of `ootName` is skipped with a log line — sound,
-MM keeps its native copies. Masks additionally require OOT's Mask Quest = Shuffle (checked via a new
+**Skip rule:** a mask family whose OOT pool holds none of `ootName` AND that OOT does not start with is
+skipped with a log line — sound, MM keeps its native copies. A family OOT *starts* with stays effective:
+MM's copies are trimmed and MM owns them from the start (`sharedStartingMm` in the spoiler). Masks additionally require OOT's Mask Quest = Shuffle (checked via a new
 `accessibility.maskQuestShuffle` dump field, `OTRGlobals.cpp`); otherwise skipped with a log line + a
 menu footer note. A family whose OOT copies exist but whose MM name doesn't match anything in MM's
 pool (a future name drift) also logs and is left out of the effective mask, rather than failing

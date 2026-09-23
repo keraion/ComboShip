@@ -1523,9 +1523,7 @@ static bool AvailableChecksRecalculateHandler(std::shared_ptr<Ship::Console> Con
 }
 
 #ifdef COMBO_BUILD
-// ComboShip (teleport songs): `combo_warp_mm <hex MM entrance>` — save, switch to MM and arrive at that
-// entrance (debug for the entrance-targeted handoff; e.g. 0xD09 = ENTRANCE(SOUTH_CLOCK_TOWN, 9), the
-// Clock Town owl statue).
+// ComboShip (teleport songs): `combo_warp_mm <hex MM entrance>`, e.g. 0xD09 = Clock Town owl statue.
 static bool ComboWarpMMHandler(std::shared_ptr<Ship::Console> Console, const std::vector<std::string>& args,
                                std::string* output) {
     if (args.size() < 2) {

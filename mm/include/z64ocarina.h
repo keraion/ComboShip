@@ -29,9 +29,7 @@ typedef enum OcarinaSongId {
     /* 22 */ OCARINA_SONG_SCARECROW_SPAWN,
     /* 23 */ OCARINA_SONG_TERMINA_WALL,
 #ifdef COMBO_BUILD
-    // ComboShip (teleport songs): Ocarina of Time's six warp songs, playable in MM once found as rando
-    // items. They sit past the 24-bit availability mask, so they are only ever enabled through
-    // VB_SONG_AVAILABLE_TO_PLAY (Rando/MiscBehavior/WarpSongs.cpp). Warp index = id - OCARINA_SONG_MINUET.
+    // ComboShip (teleport songs): OOT warp songs, past the 24-bit mask; enabled only by WarpSongs.cpp.
     /* 24 */ OCARINA_SONG_MINUET,
     /* 25 */ OCARINA_SONG_BOLERO,
     /* 26 */ OCARINA_SONG_SERENADE,

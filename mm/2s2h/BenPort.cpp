@@ -67,6 +67,7 @@ CrowdControl* CrowdControl::Instance;
 #ifdef COMBO_BUILD
 #include "ComboMenuSharedContext.h"               // ComboShip: shared per-DLL ImGui context helper (combo-owned)
 #include "rando/SharedItems.h"                    // ComboShip: Shared Items family table
+#include "rando/CrossWarpLogic.h"                 // ComboShip (teleport songs): cross-game warp logic bits
 #include "2s2h/Rando/MiscBehavior/MiscBehavior.h" // ComboShip: MM_LoadComboRando cache invalidation + ComboRando types
 #endif
 
@@ -157,12 +158,9 @@ extern "C" COMBO_EXPORT void MM_SetOnComboReturnCallback(void (*cb)(int kind)) {
     gComboReturnCallback = cb;
 }
 static bool sComboReturnPending = false;
-// ComboShip (teleport songs): cross-game handoff state. The OOT entrance a pending portal-kind return
-// should arrive at (-1 = the default, outside the Happy Mask Shop). Staged here, drained by the
-// launcher through MM_GetPendingCrossTarget.
+// ComboShip (teleport songs): OOT entrance the pending return should arrive at (-1 = default).
 static int sComboCrossTargetOOT = -1;
-// Arrival override for MM, pushed by the launcher (MM_SetTargetEntrance) before a boot/resume and
-// consumed once by Setup_InitImpl (title_setup.c). -1 = South Clock Town.
+// Arrival override pushed by the launcher, consumed once by Setup_InitImpl (-1 = South Clock Town).
 extern "C" int gComboTargetEntrance = -1;
 // Set by Setup_InitImpl on an override arrival, cleared by the next OnSceneInit.
 extern "C" int gComboCrossArrival = 0;
@@ -189,9 +187,7 @@ static void Combo_ClearReturnRequests(void) {
     sComboCrossTargetOOT = -1;
 }
 
-// ComboShip (teleport songs): gameplay-callable "switch to OOT and arrive at this entrance". Raises the
-// same portal-kind return as walking out of the Clock Tower (OnGameStateMainStart persists MM and
-// tells the launcher); only the OOT arrival differs. Console: combo_warp_oot.
+// ComboShip (teleport songs): switch to OOT and arrive at this entrance. Console: combo_warp_oot.
 extern "C" void Combo_RequestCrossSwitch(int ootEntrance) {
     if (gSaveContext.gameMode != GAMEMODE_NORMAL) {
         SPDLOG_WARN("[ComboShip] Combo_RequestCrossSwitch: not in gameplay (gameMode={})", (int)gSaveContext.gameMode);
@@ -3904,7 +3900,8 @@ static void GiveItemForOracle(RandoItemId ri) {
 extern "C" COMBO_EXPORT void Combo_MM_Rando_Reset(void) {
     // ComboShip: MM's region graph + static data are built by the eager boot
     // (MM_BootForCombo -> ShipInit::InitAll), so the oracle needs no lazy init here.
-    if (!sMM_OracleActive) { // snapshot the REAL live context only on the first Reset of a fill
+    gMMComboOracleOotSoaring = 0; // ComboShip (teleport songs): the input belongs to one query
+    if (!sMM_OracleActive) {      // snapshot the REAL live context only on the first Reset of a fill
         memcpy(&sMM_OracleSavedContext, &gSaveContext, sizeof(SaveContext));
         sMM_OracleSavedRegionTime = gCurrentRegionTime;
         sMM_OracleActive = true;
@@ -4017,6 +4014,10 @@ extern "C" COMBO_EXPORT const char* Combo_MM_GetObtainedChecks(void) {
     return cached.c_str();
 }
 
+// ComboShip (teleport songs): OOT Soaring input for the next search (cleared after it), CW_MM_OUT_* output.
+extern "C" int gMMComboOracleOotSoaring = 0;
+static uint32_t sMMComboCrossOut = 0;
+
 extern "C" COMBO_EXPORT void Combo_MM_Rando_SetOwnedItems(const char* itemNamesJson) {
     if (!itemNamesJson)
         return;
@@ -4024,6 +4025,10 @@ extern "C" COMBO_EXPORT void Combo_MM_Rando_SetOwnedItems(const char* itemNamesJ
         auto items = nlohmann::json::parse(itemNamesJson);
         const auto& nameToId = Combo_MM_SpoilerNameToItemId();
         for (const auto& name : items) {
+            if (name.get<std::string>() == ComboRando::kCwOotSoaring) {
+                gMMComboOracleOotSoaring = 1;
+                continue;
+            }
             auto it = nameToId.find(name.get<std::string>());
             if (it != nameToId.end()) {
                 GiveItemForOracle(it->second);
@@ -4362,9 +4367,7 @@ extern "C" COMBO_EXPORT int MM_GetTriforcePieceCount(void) {
     return gSaveContext.save.shipSaveInfo.rando.foundTriforcePieces;
 }
 
-// ComboShip (teleport songs): probes for OOT's Song of Soaring. Read from MM's resident gSaveContext, which the
-// launcher loads with the active slot at OOT load time (dormant-safe, same reliance as the triforce probe).
-// Bit i of the flags = OwlWarpId i activated (LSB = Great Bay Coast).
+// ComboShip (teleport songs): owl-statue probes for OOT's Song of Soaring (bit i = OwlWarpId i).
 extern "C" COMBO_EXPORT int MM_GetOwlActivationFlags(void) {
     return gSaveContext.save.saveInfo.playerData.owlActivationFlags;
 }
@@ -4463,8 +4466,41 @@ extern "C" COMBO_EXPORT const char* Combo_MM_Rando_GetReachableChecks(void) {
         }
     }
 
+    // ComboShip (teleport songs): OOT warp songs this owned-set can play, and whether any owl is active.
+    sMMComboCrossOut = 0;
+    {
+        const bool a = Flags_GetRandoInf(RANDO_INF_OBTAINED_OCARINA_BUTTON_A);
+        const bool up = Flags_GetRandoInf(RANDO_INF_OBTAINED_OCARINA_BUTTON_C_UP);
+        const bool down = Flags_GetRandoInf(RANDO_INF_OBTAINED_OCARINA_BUTTON_C_DOWN);
+        const bool left = Flags_GetRandoInf(RANDO_INF_OBTAINED_OCARINA_BUTTON_C_LEFT);
+        const bool right = Flags_GetRandoInf(RANDO_INF_OBTAINED_OCARINA_BUTTON_C_RIGHT);
+        const bool buttons[6] = {
+            a && up && left && right,   // Minuet:   A ^ < > < >
+            a && down && right,         // Bolero:   v A v A > v > v
+            a && down && right && left, // Serenade: A v > > <
+            a && down && right,         // Requiem:  A v A > v A
+            a && down && right && left, // Nocturne: < > > A < > v
+            up && right && left,        // Prelude:  ^ > ^ > < ^
+        };
+        if (RANDO_SAVE_OPTIONS[RO_SHUFFLE_SONG_WARP_SONGS] &&
+            INV_CONTENT(ITEM_OCARINA_OF_TIME) == ITEM_OCARINA_OF_TIME) {
+            for (int n = 0; n < 6; ++n) {
+                if (buttons[n] && Flags_GetRandoInf((RandoInf)(RANDO_INF_OBTAINED_SONG_MINUET + n)))
+                    sMMComboCrossOut |= (1u << n);
+            }
+        }
+        if ((gSaveContext.save.saveInfo.playerData.owlActivationFlags & 0x3FF) != 0)
+            sMMComboCrossOut |= ComboRando::CW_MM_OUT_OWL;
+    }
+    gMMComboOracleOotSoaring = 0;
+
     buf = out.dump();
     return buf.c_str();
+}
+
+// ComboShip (teleport songs): CW_MM_OUT_* for the owned-set of the LAST GetReachableChecks call.
+extern "C" COMBO_EXPORT uint32_t Combo_MM_Rando_GetCrossOut(void) {
+    return sMMComboCrossOut;
 }
 
 extern "C" COMBO_EXPORT void Combo_MM_Rando_PlaceItem(const char* checkName, const char* itemName) {

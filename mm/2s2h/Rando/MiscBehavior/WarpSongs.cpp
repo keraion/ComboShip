@@ -1,13 +1,4 @@
-// ComboShip (cross-game teleport songs): Ocarina of Time's six warp songs as MM rando items.
-//
-// Playing one in Termina shows "You played the <song>." then asks "Warp to <place>?"; Yes persists MM and
-// hands off to OOT arriving at that warp pad (Combo_RequestCrossSwitch, the entrance-targeted handoff).
-// Refused wherever MM refuses its own Song of Soaring (restriction flag, dungeons, the Secret Shrine).
-//
-// The songs live past MM's 24-bit availability mask, so this file is the only thing that ever makes them
-// playable (VB_SONG_AVAILABLE_TO_PLAY). Both prompts reuse text id 0x1B95 with a local state machine,
-// exactly like SariasSongHint.cpp, so no new message-table ids are needed and ClockShuffle's unguarded
-// hooks on 0x1B8A..0x1B92 (where 0x1B72 + id would have landed) stay untouched.
+// ComboShip (teleport songs): OOT's warp songs in MM; playing one offers a warp to its OOT pad.
 #ifdef COMBO_BUILD
 
 #include "2s2h/CustomMessage/CustomMessage.h"
@@ -34,16 +25,13 @@ const char* const kSongNames[6] = {
     "Minuet of Forest",  "Bolero of Fire",     "Serenade of Water",
     "Requiem of Spirit", "Nocturne of Shadow", "Prelude of Light",
 };
-// OOT's own "Warp to X?" prompts tint the destination in the song's color. MM's color bytes:
-// 0x02 green, 0x01 red (MM's red is orange-red), 0x03 blue, 0x04 yellow, 0x06 purple, 0x05 light blue.
+// Destination tint per song, like OOT's own warp prompts.
 const char* const kPlaceColors[6] = { "%g", "%r", "%b", "%y", "%p", "\x05" };
 const char* const kPlaceNames[6] = {
     "the Sacred Forest Meadow", "Death Mountain Crater", "Lake Hylia",
     "the Desert Colossus",      "the Graveyard",         "the Temple of Time",
 };
-// OOT's warp-pad entrances (soh/include/tables/entrance_table.h), same order as z_player.c's
-// sWarpSongEntrances. OOT's TitleSetup routes the value through Entrance_OverrideNextIndex, so entrance
-// rando is honored on that side.
+// OOT warp-pad entrances in warp-index order.
 const int kWarpPadEntrances[6] = {
     0x0600, // ENTR_SACRED_FOREST_MEADOW_WARP_PAD
     0x04F6, // ENTR_DEATH_MOUNTAIN_CRATER_WARP_PAD
@@ -57,8 +45,7 @@ bool IsWarpSongId(int songId) {
     return songId >= OCARINA_SONG_MINUET && songId <= OCARINA_SONG_PRELUDE;
 }
 
-// Mirrors the Song of Soaring branch in z_message.c (MSGMODE_TEXT_CLOSING): the restriction flag, any
-// room with a dungeon map, and the Secret Shrine.
+// Same refusals as MM's own Song of Soaring (z_message.c).
 bool SoaringForbiddenHere() {
     PlayState* play = gPlayState;
     return play->interfaceCtx.restrictions.songOfSoaring != 0 || Map_CurRoomHasMapI(play) ||
@@ -71,13 +58,11 @@ void Rando::MiscBehavior::WarpSongs() {
     bool shouldRegister = IS_RANDO && RANDO_SAVE_OPTIONS[RO_SHUFFLE_SONG_WARP_SONGS];
     sState = WS_IDLE;
 
-    // Ownership. Both the free-play recogniser (code_8019AF00.c) and the song-played gate (z_message.c)
-    // ask here; the vanilla condition is always false for these ids (no quest bit, past the mask).
+    // Only path that makes these songs playable (no quest bit, past the 24-bit mask).
     COND_VB_SHOULD(VB_SONG_AVAILABLE_TO_PLAY, shouldRegister, {
         uint8_t* songIndex = va_arg(args, uint8_t*);
         if (IsWarpSongId(*songIndex)) {
-            // Give the Termina wall (En_Gakufu) priority: while it listens for its tune, suppress our warp
-            // songs so a coinciding warp id can't win the recogniser's last-match and teleport instead.
+            // Let the Termina wall (En_Gakufu) win while it listens for its tune.
             if (sOcarinaAvailableSongFlags & (1 << OCARINA_SONG_TERMINA_WALL)) {
                 *should = false;
             } else {
@@ -93,8 +78,7 @@ void Rando::MiscBehavior::WarpSongs() {
             *should = true;
             sWarpIndex = (u8)(sLastPlayedSong - OCARINA_SONG_MINUET);
             sLastPlayedSong = 0xFF;
-            // Refused: the vanilla 0x1B95 text loads (sState stays IDLE, the OnOpenText hook below passes)
-            // and the restricted-song mode dismisses it. Otherwise our prompt replaces the same id.
+            // Refused: vanilla 0x1B95 loads and is dismissed. Otherwise our prompt replaces it.
             sState = SoaringForbiddenHere() ? WS_IDLE : WS_CONFIRM;
             Message_StartTextbox(gPlayState, 0x1B95, NULL);
             gPlayState->msgCtx.ocarinaMode = OCARINA_MODE_PROCESS_RESTRICTED_SONG;
@@ -106,8 +90,7 @@ void Rando::MiscBehavior::WarpSongs() {
         if (sState == WS_CONFIRM && gPlayState->msgCtx.ocarinaMode == OCARINA_MODE_PROCESS_RESTRICTED_SONG) {
             *should = true;
             Input* input = CONTROLLER1(&gPlayState->state);
-            // A fresh press only (see SariasSongHint.cpp): a button still held from the name box would
-            // otherwise confirm the default "Yes" before the player has seen the prompt.
+            // Fresh press only, so a held button can't confirm Yes unseen (see SariasSongHint.cpp).
             const bool pressedA = CHECK_BTN_ALL(input->press.button, BTN_A);
             const bool pressedB = CHECK_BTN_ALL(input->press.button, BTN_B);
             if (pressedA || pressedB) {

@@ -50,7 +50,7 @@ void Settings::CreateOptionDescriptions() {
         "Adds Majora's Mask's Song of Soaring to the item pool. Playing it in Hyrule opens Termina's owl-statue "
         "map (statues already activated in the MM save) and switches games to the chosen statue.\n"
         "\n"
-        "Refused wherever OOT's own warp songs are. Not part of logic.";
+        "Refused wherever OOT's own warp songs are.";
 #endif
     mOptionDescriptions[RSK_STARTING_AGE] =
         "Choose which age Link will start as.\n\n"

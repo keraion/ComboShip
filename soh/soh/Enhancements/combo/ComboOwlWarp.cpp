@@ -1,20 +1,5 @@
-// ComboShip (cross-game teleport songs): Majora's Mask's Song of Soaring as an OOT randomizer item.
-//
-// Playing MM's Song of Soaring (C-down, C-left, C-up, twice) in free play opens a flat port of MM's
-// owl-statue warp map, drawn with MM's own textures through the "mm" ResourceManager bracket, showing
-// the statues already activated in the dormant MM save. Confirming one hands off to MM at that statue
-// (Combo_RequestCrossSwitch, the entrance-targeted handoff). Refused where OOT refuses its own warp
-// songs, and with "you have yet to leave your mark" when no statue is activated (MM's own text).
-//
-// Recognition never touches OOT's ocarina tables: the 12-song u16 availability word has no free bit
-// and every per-song table is 12 wide. The note stream is watched from OnOcarinaNote and its tail
-// compared against the six-pitch pattern (no vanilla song is a suffix of it). On a match the ocarina
-// session is closed the way the vanilla B-cancel closes it, and only once the message mode is clean
-// again does anything else start (PauseWarp's shape): the refusal textbox, or the chooser, which freezes
-// the world with a real pauseCtx->state (so the engine keeps drawing its Start "Return" prompt) and holds Link with
-// PLAYER_STATE1_IN_CUTSCENE, stepping Message_Update itself for the Yes/No prompt so the freeze holds. Starting a
-// textbox while the session is still in MSGMODE_OCARINA_PLAYING corrupts the message context (it spilled into
-// interfaceCtx->view). The map is drawn from OnPlayDrawEnd into OVERLAY_DISP, under the HUD and any textbox, like MM's.
+// ComboShip (teleport songs): MM's Song of Soaring in OOT. Opens a flat port of MM's owl map and warps
+// to the chosen activated statue.
 #ifdef COMBO_BUILD
 #include <libultraship/bridge/consolevariablebridge.h>
 #include "soh/ShipInit.hpp"
@@ -39,8 +24,7 @@ extern PlayState* gPlayState;
 extern int (*gComboOwlFlagsProvider)(void);
 extern int (*gComboOwlWarpEntranceProvider)(int owlId);
 void Combo_RequestCrossSwitch(int mmEntrance);
-// OPEN_DISPS / CLOSE_DISPS re-declare these at block scope; that declaration only keeps C linkage when
-// the enclosing function is extern "C" (draw.cpp), so declare them here first (frame_interpolation.cpp).
+// Declared first so OPEN_DISPS' block-scope declarations keep C linkage.
 void FrameInterpolation_RecordOpenChild(const void* a, int b);
 void FrameInterpolation_RecordCloseChild(void);
 }
@@ -64,8 +48,7 @@ COW_MM_ASSET(sCowNameSouthernSwamp, "__OTR__map_name_static/gMapPointSouthernSwa
 COW_MM_ASSET(sCowNameIkanaCanyon, "__OTR__map_name_static/gMapPointIkanaCanyonENGTex");
 COW_MM_ASSET(sCowNameStoneTower, "__OTR__map_name_static/gMapPointStoneTowerENGTex");
 
-// MM's map-page parchment tiles (sMapPageBgTextures): a 3x5 grid of 80x32 IA8 tiles framing the world map,
-// in icon_item_static_yar except the col-1 row-0 title tile (language-specific, in icon_item_jpn_static).
+// MM's map-page parchment tiles (sMapPageBgTextures); the title tile is in icon_item_jpn_static.
 COW_MM_ASSET(sCowMap00, "__OTR__icon_item_static_yar/gPauseMap00Tex");
 COW_MM_ASSET(sCowMap01, "__OTR__icon_item_static_yar/gPauseMap01Tex");
 COW_MM_ASSET(sCowMap02, "__OTR__icon_item_static_yar/gPauseMap02Tex");
@@ -90,8 +73,7 @@ COW_MM_ASSET(sCowNamePanelR, "__OTR__icon_item_static_yar/gNamePanelRightTex"); 
 
 constexpr int COW_OWL_COUNT = 10; // OwlWarpId 0..9, bit i of MM's owlActivationFlags
 constexpr int COW_OWL_CLOCK_TOWN = 4;
-// A real pauseCtx->state that freezes the world and lets Interface_Draw show the Start "Return" prompt, but
-// (>=18, outside 4..7/0xB..0x12, no KaleidoScope_Update case) draws no OOT pause pages -- kaleido no-ops.
+// A pause state that freezes the world but draws no kaleido page.
 constexpr u16 COW_PAUSE_STATE = 0x14;
 constexpr int COW_MAP_W = 216;
 constexpr int COW_MAP_H = 128;
@@ -104,8 +86,7 @@ const char* const sCowOwlNames[COW_OWL_COUNT] = {
     "Great Bay Coast", "Zora Cape", "Snowhead",       "Mountain Village", "Clock Town",
     "Milk Road",       "Woodfall",  "Southern Swamp", "Ikana Canyon",     "Stone Tower",
 };
-// Owl icon quads in MM's map-page space (sVtxPageMapWorldQuadsX/Y), 24x12, top-left at (X, Y), Y up. On
-// our flat map screen = (X + 161, 120 - Y).
+// Owl quads in MM map-page space (sVtxPageMapWorldQuadsX/Y); screen = (X + 161, 120 - Y).
 const s16 sCowOwlX[COW_OWL_COUNT] = { -80, -64, -9, -3, -7, -16, -1, 23, 44, 54 };
 const s16 sCowOwlY[COW_OWL_COUNT] = { -8, -38, 39, 26, 1, -7, -28, -27, -1, 24 };
 
@@ -121,8 +102,7 @@ bool sStickLatch = false;
 bool sHoldingLink = false;     // PLAYER_STATE1_IN_CUTSCENE set by us
 bool sPromptCancelled = false; // B pressed while the Yes/No prompt was up: B closes it with the cursor still on Yes
 
-// Recognition ring, fed from OnOcarinaNote (mirrors AudioOcarina_CheckSongsWithoutMusicStaff's rules:
-// a note counts when the pitch changes and is not silence). The flag is consumed on the main thread.
+// Note ring fed from OnOcarinaNote (AudioOcarina_CheckSongsWithoutMusicStaff's rules).
 constexpr int COW_RING = 8;
 u8 sRing[COW_RING];
 int sRingLen = 0;
@@ -197,8 +177,7 @@ int CowStepCursor(int from, int dir) {
     return from;
 }
 
-// Enter/leave our owl-warp pause via a real pauseCtx->state (freezes the world like the pause menu). Leaving
-// restores the player-actor overlay the pause swapped out (KaleidoScopeCall_LoadPlayer) and the Start alpha.
+// Enter/leave the freeze; leaving restores the player overlay and Start alpha.
 void CowFreeze(PlayState* play, bool freeze) {
     if (freeze) {
         play->pauseCtx.state = COW_PAUSE_STATE;
@@ -206,8 +185,7 @@ void CowFreeze(PlayState* play, bool freeze) {
         play->pauseCtx.state = 0;
         play->interfaceCtx.startAlpha = 0;
         KaleidoScopeCall_LoadPlayer();
-        // Bring back the HUD the ocarina hid: we bypassed its normal restore, so run it here (z_message.c's
-        // ocarina-close path) or the HUD stays dark until the next ocarina.
+        // Restore the HUD the ocarina hid; we bypassed z_message.c's close path.
         if (gSaveContext.prevHudVisibilityMode == HUD_VISIBILITY_NO_CHANGE ||
             gSaveContext.prevHudVisibilityMode == HUD_VISIBILITY_NOTHING ||
             gSaveContext.prevHudVisibilityMode == HUD_VISIBILITY_NOTHING_ALT) {
@@ -228,16 +206,14 @@ void CowHoldLink(PlayState* play, bool hold) {
     sHoldingLink = hold;
 }
 
-// The song was played: end the ocarina session exactly like the vanilla B-cancel (z_message_PAL.c
-// MSGMODE_OCARINA_PLAYING) and decide what follows once the message mode is clean. Main thread only.
+// End the ocarina session like the vanilla B-cancel. Main thread only.
 void CowOnSongPlayed(PlayState* play) {
     MessageContext* msgCtx = &play->msgCtx;
     AudioOcarina_SetInstrument(OCARINA_INSTRUMENT_OFF);
     Sfx_PlaySfxCentered(NA_SE_SY_CORRECT_CHIME); // OOT's bank has no MM soaring jingle
     msgCtx->ocarinaMode = OCARINA_MODE_04;       // Link puts the ocarina away
     Message_CloseTextbox(play);
-    // Same order as the vanilla warp-song branch (MSGMODE_SONG_PLAYED_ACT): a room that forbids warp
-    // songs refuses first; the restriction-flag rule is rando-exempt there, so it is here.
+    // Vanilla warp-song refusal order (restriction flag is rando-exempt there too).
     if (msgCtx->disableWarpSongs) {
         sPendingText = 0x88C; // "You can't warp here!"
     } else {
@@ -360,12 +336,10 @@ void CowUpdate() {
             return;
         }
         case COW_CONFIRM: {
-            // The world stays frozen through the prompt, so step the message system ourselves (Play_Update
-            // skips it while a pause state is set; Message_Draw still runs from Play_DrawOverlayElements).
+            // The world is frozen, so step the message system ourselves.
             if (msgCtx->msgMode != MSGMODE_NONE) {
                 if (!sPromptCancelled && CHECK_BTN_ALL(input->press.button, BTN_B)) {
-                    // B cancels. Close it ourselves and skip Message_Update this frame so the message
-                    // system doesn't also play its own confirm/pass sound on top of the cancel.
+                    // B cancels; skip Message_Update so it doesn't play its own sound too.
                     sPromptCancelled = true;
                     Sfx_PlaySfxCentered(NA_SE_SY_CANCEL);
                     Message_CloseTextbox(play);
@@ -398,8 +372,7 @@ void CowUpdate() {
     }
 }
 
-// Anything that reloads the world drops the chooser (a scene change can happen if a cutscene fires on
-// the frame the song completes).
+// Anything that reloads the world drops the chooser.
 void CowReset() {
     if (gPlayState != nullptr) {
         CowFreeze(gPlayState, false);
@@ -416,16 +389,14 @@ void CowReset() {
 
 } // namespace
 
-// File scope, not the anonymous namespace: OPEN_DISPS / CLOSE_DISPS re-declare the frame-interpolation
-// hooks at block scope, which inside a namespace would name a namespace-local symbol.
+// File scope: inside a namespace OPEN_DISPS' block-scope declarations would be namespace-local.
 static void CowDraw() {
     PlayState* play = gPlayState;
     if (sState == COW_OFF || play == nullptr) {
         return;
     }
 
-    // Drive the engine's Start "Return" prompt (Interface_Draw reads startAlpha right after this) and zero the
-    // rest of the HUD so only it shows over the map. Off during the Yes/No box and the pre-freeze states.
+    // Show only the Start "Return" prompt over the map; off during the Yes/No box.
     if (sState == COW_FADE_IN || sState == COW_SELECT || sState == COW_CONFIRM || sState == COW_FADE_OUT) {
         InterfaceContext* ic = &play->interfaceCtx;
         ic->startAlpha = (sState == COW_CONFIRM) ? 0 : (s16)sAlpha;
@@ -437,13 +408,12 @@ static void CowDraw() {
 
     Gfx_SetupDL_39Overlay(play->state.gfxCtx);
     gDPSetTextureFilter(OVERLAY_DISP++,
-                        G_TF_BILERP); // MM's owl map is bilinear (z_kaleido_map.c:722); point looked blocky upscaled
+                        G_TF_BILERP); // bilinear, like MM's owl map
 
     // Everything MM-owned resolves against MM's ResourceManager between push and pop.
     gSPComboRMPush(OVERLAY_DISP++, "mm");
 
-    // Map-page parchment frame behind the world map: the 3x5 grid of 80x32 IA8 tiles tinted MM's tan, with
-    // row 0 as the "MAP" title band, rows 1-4 the framed map, and row 4 spilling below as a bottom border.
+    // MM's map-page parchment frame: 3x5 grid of 80x32 IA8 tiles, row 0 is the title band.
     gDPSetRenderMode(OVERLAY_DISP++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
     gDPSetCombineMode(OVERLAY_DISP++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
     gDPSetPrimColor(OVERLAY_DISP++, 0, 0, 180, 180, 120, sAlpha);
@@ -461,7 +431,7 @@ static void CowDraw() {
 
     // Termina map: CI8 + 256-color palette, 16 strips of 8 rows (MM z_kaleido_map.c, flat path).
     gDPSetTextureFilter(OVERLAY_DISP++,
-                        G_TF_POINT); // the world map itself is point-filtered in MM (z_kaleido_map.c:650)
+                        G_TF_POINT); // point-filtered, like MM's world map
     gDPSetRenderMode(OVERLAY_DISP++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
     gDPSetCombineMode(OVERLAY_DISP++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
     gDPSetPrimColor(OVERLAY_DISP++, 0, 0, 255, 255, 255, sAlpha);
@@ -501,8 +471,7 @@ static void CowDraw() {
                             1 << 10, 1 << 10);
     }
 
-    // Name panel behind the location name -- MM's gItemNamePanelDL: gNamePanelLeft/RightTex, two IA8
-    // 72x24 tiles side by side (144 wide), tinted MM's tan (prim 150,140,90), the same box MM draws.
+    // Name panel, as MM's gItemNamePanelDL.
     gDPPipeSync(OVERLAY_DISP++);
     gDPSetRenderMode(OVERLAY_DISP++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
     gDPSetCombineMode(OVERLAY_DISP++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
@@ -551,8 +520,7 @@ static void RegisterComboOwlWarp() {
     // Registered whenever a rando save is loaded; the seed option and item ownership are checked per use.
     const bool on = IS_RANDO;
     CowReset();
-    // Format() appends MESSAGE_END; without it LoadIntoFont's raw text has no terminator and Message_Decode
-    // overruns the 200-byte buffer into interfaceCtx (crash). Once only: it mutates.
+    // Format() adds the MESSAGE_END LoadIntoFont needs. Once only: it mutates.
     static bool sNoMarkFormatted = false;
     if (!sNoMarkFormatted) {
         sNoMarkMsg.Format();

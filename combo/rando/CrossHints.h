@@ -313,10 +313,7 @@ inline nlohmann::json Generate(uint32_t masterSeed, const std::string& sohDumpJs
     // Build the candidate list from the same placements the pare-down scored, so requiredness lines
     // up exactly with what gets hinted.
     auto placements = ParseSpoilerPlacements(spoilerJson, sohDumpJson, mmDumpJson);
-    // Shared Items: an effective family's MM copies were trimmed, so MM's own item-location NPC hints
-    // (the Song of Soaring engraving, the Zora's Hookshot hint) would find no placement and say "an
-    // Unknown Location". Point them at the OOT copy that now counts for both games (the first placed
-    // copy of a multi-tier family). Consumes no RNG.
+    // Shared Items: point MM's item-location hints at the OOT copy of a trimmed family.
     {
         uint32_t sharedMask = 0;
         try {

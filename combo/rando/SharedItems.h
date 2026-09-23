@@ -106,10 +106,7 @@ inline const SharedFamilyDef* SharedFamilyTable() {
         { SF_MASK_OF_TRUTH, "maskOfTruth", "gCombo.Rando.Shared.MaskOfTruth", "Shared Mask of Truth",
           "One Mask of Truth counts for both games. Requires OOT Mask Quest = Shuffle.", "Mask of Truth",
           "Mask of Truth", 1, true, true, false },
-        // Teleport songs. Each needs its feature on in BOTH games or the generator skips it with a log
-        // line: OOT's "Song of Soaring (soar to Termina)" puts Soaring in OOT's pool, MM's "OoT Warp
-        // Songs" puts the warp songs in MM's. The six warp rows share one CVar = one menu toggle, but
-        // stay separate families so the effective mask is exact per song (e.g. OOT starts with one).
+        // Teleport songs need their feature on in both games; the six warp rows share one CVar.
         { SF_SONG_OF_SOARING, "songOfSoaring", "gCombo.Rando.Shared.SongOfSoaring", "Shared Song of Soaring",
           "One Song of Soaring counts for both games. Requires OOT's Song of Soaring (soar to Termina).",
           "Song of Soaring", "Song of Soaring", 1, false, true, false },

@@ -4378,9 +4378,7 @@ s16 sOcarinaSongFanfares[] = {
     NA_BGM_OCARINA_LULLABY_INTRO_PTR, // OCARINA_SONG_WIND_FISH_HUMAN
     NA_BGM_OCARINA_LULLABY_INTRO_PTR, // OCARINA_SONG_WIND_FISH_GORON
 #ifdef COMBO_BUILD
-    // ComboShip: the table is indexed by msgCtx->songPlayed (below), which vanilla only reaches with ids
-    // <= OCARINA_SONG_SCARECROW_SPAWN; the entries up to there were an out-of-bounds read. Then the OOT
-    // warp songs (teleport songs), which share the soaring jingle: OOT's own are not in MM's bank.
+    // ComboShip: fill the ids vanilla already read past the end; OOT warp songs reuse the soaring jingle.
     NA_BGM_OCARINA_LULLABY_INTRO_PTR, // OCARINA_SONG_WIND_FISH_ZORA
     NA_BGM_OCARINA_LULLABY_INTRO_PTR, // OCARINA_SONG_WIND_FISH_DEKU
     NA_BGM_OCARINA_LULLABY_INTRO_PTR, // OCARINA_SONG_EVAN_PART1
@@ -4885,8 +4883,7 @@ void Message_DrawMain(PlayState* play, Gfx** gfxP) {
                     Message_ContinueTextbox(play, 0x1B6B);
 #ifdef COMBO_BUILD
                 } else if (OCARINA_SONG_IS_OOT_WARP(msgCtx->songPlayed)) {
-                    // ComboShip (teleport songs): 0x1B72 + id would be a Song of Time prompt; WarpSongs.cpp
-                    // supplies the "You played the ..." body for 0x1B95 in this message mode.
+                    // ComboShip (teleport songs): WarpSongs.cpp supplies this text via 0x1B95.
                     Message_ContinueTextbox(play, 0x1B95);
 #endif
                 } else {

@@ -1409,8 +1409,7 @@ void DrawSong(ItemTrackerItem item) {
     float iconSize = static_cast<float>(CVarGetInteger(CVAR_TRACKER_ITEM("IconSize"), 36));
     ImVec2 p = ImGui::GetCursorScreenPos();
 #ifdef COMBO_BUILD
-    // ComboShip (teleport songs): Song of Soaring is a rando item, not a quest-song bit, so its ownership
-    // and name come from the randomizer inf rather than HasSong()/GetQuestItemName().
+    // ComboShip (teleport songs): Soaring's ownership and name come from its RandInf.
     bool isSoaring = item.id == RG_SONG_OF_SOARING;
     bool hasSong = isSoaring ? Flags_GetRandomizerInf(RAND_INF_HAS_SONG_OF_SOARING) : HasSong(item);
 #else

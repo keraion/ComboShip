@@ -217,7 +217,7 @@ typedef void (*FnMMResume)(int);
 static FnMMResume MM_ResumeGame = nullptr;
 static FnVoidArgless MM_PrepareForTransition = nullptr;
 
-// ComboShip (teleport songs): Entrance handoff 
+// ComboShip (teleport songs): Entrance handoff
 typedef int (*FnGetCrossTarget)(void); // consume-on-read, -1 = none
 typedef void (*FnSetTargetEntrance)(int);
 static FnGetCrossTarget SOH_GetPendingCrossTarget = nullptr;
@@ -1432,7 +1432,7 @@ static int Combo_GetMmTriforceCount() {
 
 // ComboShip (teleport songs): MM owl flags for OOT's active slot (-1 if not resident) and owl entrances.
 static int Combo_GetMmOwlFlags() {
-    if (!MM_GetOwlActivationFlags || g_MmSaveInMemorySlot < 0)
+    if (!MM_GetOwlActivationFlags || g_comboCompletionSlot < 0 || g_MmSaveInMemorySlot != g_comboCompletionSlot)
         return -1;
     return MM_GetOwlActivationFlags();
 }

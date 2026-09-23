@@ -1,7 +1,7 @@
 // combo/rando/CrossWarpLogic.h
 // ComboShip: cross-game teleport-song LOGIC for the combined fill (split, i.e. unshared, copies too).
 // MM's copy of an OOT warp song reaches that warp pad in Hyrule; OOT's Song of Soaring reaches any
-// activated owl statue in Termina. 
+// activated owl statue in Termina.
 //
 // NOTE: Neither oracle can see the other game, so each reports what its side can do (GetCrossOut,
 // valid right after GetReachableChecks like GetPortalOpen) and the fill feeds that
